@@ -52,6 +52,7 @@ uv pip install -r python/ctext_worker/requirements.txt --python .venv/Scripts/py
 | `pnpm verify:log` | M0-06 日志验收（落盘、脱敏、级别、耗时、错误码映射、全局兜底 + toast） |
 | `pnpm verify:ui` | M0-08 侧栏验收（五入口切换、选中态唯一、书库过滤与离线态、两级折叠、空页面） |
 | `pnpm verify:roots` | M1-01 根目录验收（登记查重、掉线与恢复、事件广播、重定位、移除不删书） |
+| `pnpm verify:scan` | M1-02 扫描器验收（白名单、忽略、深度、符号链接防环、截断、取消、1000 文件性能） |
 | `pnpm verify:package` | M0-07 打包验收（构建 → 解包目录 → 真跑一次自检）；加 `--installer` 连安装/卸载一起验 |
 | `pnpm build:worker` | 用 PyInstaller 把 Python worker 打成 `resources/python/ctext-worker/` |
 | `pnpm check:env` / `pnpm check:env:electron` | 环境自检 |
@@ -70,7 +71,7 @@ src/
 │  ├─ index.ts         app 生命周期、单实例锁、窗口创建、日志/兜底初始化
 │  ├─ ipc/             通道注册（registry / system / window / log / roots）+ 冒烟
 │  ├─ db/              连接、PRAGMA、版本化迁移、DDL；repositories/ 是各表的 SQL 封装
-│  ├─ library/         书库业务：根目录探测与状态监测（roots-monitor）+ 冒烟
+│  ├─ library/         书库业务：根目录探测与状态监测（roots-monitor）、目录扫描（scanner）+ 各自自检
 │  ├─ bridge/          Python worker：进程管理、NDJSON 协议、定位启动命令
 │  ├─ log/             结构化日志：JSON Lines 落盘、按天滚动、级别过滤、计时
 │  ├─ errors/          全局异常兜底（uncaughtException / 渲染进程退出 / preload 失败…）
@@ -144,6 +145,27 @@ docs/                  产品文档 / 开发计划 / MVP 范围
 - **`roots:remove` 不删书**：`books.root_id` 外键没有 `ON DELETE`，所以仓储在同一事务里先 `UPDATE books SET root_id = NULL` 再删根目录。解绑后的书 `root_id` 为 NULL，与网络书共用同一表示，靠 `source_type` 区分。
 - **路径查重靠 `lower(path)`**：SQLite 是字节级比较，而 Windows 大小写不敏感，不折叠 `D:\Books` 与 `d:\books` 会被登记成两条。
 - 验收命令 `pnpm verify:roots`（40 项，用删除临时目录模拟拔盘）。**必须带 `--user-data-dir`**：自检会往库里写测试根目录。
+
+## 目录扫描器（M1-02）
+
+`scanDirectory(root, options)` 只做一件事：**递归找出所有可导入的文件，不读内容、不碰数据库**。指纹、解析、入库都在下游，所以它能在无窗口、无 DB 的环境里跑（`pnpm verify:scan` 全程约 10s）。
+
+| 选项 | 默认 | 说明 |
+| --- | --- | --- |
+| `maxDepth` | 8 | **root 是第 0 层**，8 表示最多进到第 8 层子目录 |
+| `extensions` | `.txt` / `.epub` | 大小写不敏感（D1：不做 MOBI/AZW3/PDF） |
+| `ignore` | `node_modules` / `.git` / `.svn` / `.hg` / `$RECYCLE.BIN` / `System Volume Information` | 正则源码，对 `/` 分隔的 `rel_path` 匹配 |
+| `maxFiles` | 50000 | 超过标记 `truncated` 并停止入队；防用户误选 `C:\` |
+| `concurrency` | 8 | 并发目录数 |
+| `signal` | — | `AbortSignal`，M1-06 的任务取消用 |
+
+几条必须记住的约定：
+
+- **`rel_path` 一律 `/` 分隔**，落盘前必须过 `resolveRelPath()`。库里存的是相对路径，混用系统分隔符会在「父目录判断」「字符串前缀比较」这类地方出问题。
+- **符号链接一律不跟随**（`stats.skippedSymlink` 计数）。跟随就要 realpath 去环，每条目多一次 IO；而「防环」最彻底的实现是根本不进去。根目录本身是链接没问题，只是内部的链接不展开。
+- **不可读目录只记录不中断**：错误进 `stats.unreadable`，一个目录 EACCES 不该让整次扫描失败。
+- **结果按 `relPath` 升序**，导入流程依赖稳定顺序做进度估算。
+- **`ignore` 正则写错时静默跳过**，不让扫描崩；设置页（M5-01）必须在输入时校验能否编译。
 
 ## 界面骨架（M0-08）
 

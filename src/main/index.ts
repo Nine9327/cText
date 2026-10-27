@@ -14,7 +14,8 @@ import { registerRootsIpc } from './ipc/roots'
 import { registerSystemIpc } from './ipc/system'
 import { attachWindowStateEvents, registerWindowIpc } from './ipc/window'
 import { installRootsMonitor, stopRootsMonitor } from './library/roots-monitor'
-import { runRootsSmoke } from './library/smoke'
+import { runRootsSmoke } from './library/roots-smoke'
+import { runScannerSmoke } from './library/scanner-smoke'
 import { runPackageSmoke } from './package/smoke'
 import { runUiSmoke } from './ui/smoke'
 import {
@@ -279,6 +280,18 @@ if (!gotLock) {
       }
       const failed = checks.filter((c) => !c.ok).length
       console.log(`SMOKE DB SUMMARY ${checks.length - failed}/${checks.length}`)
+      app.exit(failed === 0 ? 0 : 1)
+      return
+    }
+
+    // M1-02 自检：目录扫描器。纯主进程，不需要窗口，改扫描逻辑时能高频跑
+    if (!app.isPackaged && process.env['CTEXT_SCAN_SMOKE'] === '1') {
+      const checks = await runScannerSmoke()
+      for (const c of checks) {
+        console.log(`SMOKE SCAN ${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.detail ? ` (${c.detail})` : ''}`)
+      }
+      const failed = checks.filter((c) => !c.ok).length
+      console.log(`SMOKE SCAN SUMMARY ${checks.length - failed}/${checks.length}`)
       app.exit(failed === 0 ? 0 : 1)
       return
     }
