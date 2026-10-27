@@ -1,7 +1,11 @@
-import { app, BrowserWindow, dialog, ipcMain, screen, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, screen, session, shell } from 'electron'
 import { join } from 'node:path'
 import { closeDatabase, initDatabase } from './db/connection'
 import { runDbSmoke } from './db/smoke'
+import { installIpc } from './ipc/registry'
+import { runIpcSmoke } from './ipc/smoke'
+import { registerSystemIpc } from './ipc/system'
+import { attachWindowStateEvents, registerWindowIpc } from './ipc/window'
 
 const isDev = !app.isPackaged
 
@@ -90,26 +94,11 @@ function createWindow() {
     mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
   }
 
-  const pushWindowState = () => {
-    if (!mainWindow) return
-    mainWindow.webContents.send('window:state', { maximized: mainWindow.isMaximized() })
-  }
-  mainWindow.on('maximize', pushWindowState)
-  mainWindow.on('unmaximize', pushWindowState)
+  attachWindowStateEvents(mainWindow)
+
   mainWindow.on('closed', () => {
     mainWindow = null
   })
-}
-
-function registerWindowIpc() {
-  ipcMain.on('window:minimize', () => mainWindow?.minimize())
-  ipcMain.on('window:toggle-maximize', () => {
-    if (!mainWindow) return
-    if (mainWindow.isMaximized()) mainWindow.unmaximize()
-    else mainWindow.maximize()
-  })
-  ipcMain.on('window:close', () => mainWindow?.close())
-  ipcMain.handle('window:is-maximized', () => mainWindow?.isMaximized() ?? false)
 }
 
 /**
@@ -192,7 +181,11 @@ if (!gotLock) {
 
   app.whenReady().then(() => {
     applyCsp()
+
+    // M0-04：先登记各域 handler，再由 registry 统一安装（未实现的通道装占位）
     registerWindowIpc()
+    registerSystemIpc()
+    installIpc()
 
     // M0-03：数据库在窗口创建之前初始化，失败则不进入界面
     const dbFile = join(app.getPath('userData'), 'ctext.db')
@@ -222,8 +215,12 @@ if (!gotLock) {
 
     createWindow()
 
-    if (!app.isPackaged && process.env['CTEXT_SMOKE'] === '1' && mainWindow) {
-      void runSmoke(mainWindow)
+    if (!app.isPackaged && mainWindow) {
+      if (process.env['CTEXT_IPC_SMOKE'] === '1') {
+        void runIpcSmoke(mainWindow)
+        return
+      }
+      if (process.env['CTEXT_SMOKE'] === '1') void runSmoke(mainWindow)
     }
 
     app.on('activate', () => {

@@ -2,7 +2,7 @@
 
 本地优先、可接入网络书源的 Windows 桌面小说阅读器。把散落在多个硬盘 / 移动硬盘里的 TXT、EPUB 收进统一书库，像管理音乐一样管理小说，并支持导入「阅读 3.0」书源搜索网络小说。
 
-> **当前状态**：M0 骨架阶段。窗口外壳与侧栏已完成，列表数据来自 `src/renderer/mock/library.ts`，数据库、文件导入、阅读器均未实现。
+> **当前状态**：M0 骨架阶段。窗口外壳、侧栏、数据库层、IPC 框架已完成；列表数据仍来自 `src/renderer/mock/library.ts`，文件导入与阅读器未实现。
 
 ## 平台
 
@@ -44,6 +44,7 @@ pnpm setup:python   # 建立 .python/ 解释器与 .venv/，均留在仓库内�
 | `pnpm typecheck` | 主进程 + 渲染层类型检查 |
 | `pnpm verify:shell` | M0-02 窗口外壳验收（构建 + 冒烟断言 + 单实例锁） |
 | `pnpm verify:db` | M0-03 数据库验收（建库、迁移幂等、约束、FTS 触发器） |
+| `pnpm verify:ipc` | M0-04 IPC 验收（白名单、zod 校验、未实现占位、异常映射） |
 | `pnpm check:env` / `pnpm check:env:electron` | 环境自检 |
 | `pnpm rebuild:native` | 手动按 Electron ABI 重建原生模块 |
 | `pnpm setup:python` | 建立仓库内 Python 3.11 与虚拟环境 |
@@ -53,13 +54,32 @@ pnpm setup:python   # 建立 .python/ 解释器与 .venv/，均留在仓库内�
 
 ```
 src/
-├─ main/        主进程：窗口外壳、IPC、（后续）DB 与解析调度
-├─ preload/     contextBridge 白名单，渲染层唯一入口
-├─ renderer/    Vue 3 渲染层（views / components / router / mock）
-└─ shared/      主进程与渲染层共享的类型与常量
-scripts/        环境自检、验收与本机环境适配脚本
-docs/           产品文档 / 开发计划 / MVP 范围
+├─ main/               主进程
+│  ├─ index.ts         app 生命周期、单实例锁、窗口创建
+│  ├─ ipc/             通道注册（registry / system / window）+ 冒烟
+│  ├─ db/              连接、PRAGMA、版本化迁移、DDL
+│  └─ utils/           作用域日志（M0-06 换成结构化日志）
+├─ preload/            contextBridge 白名单，渲染层唯一入口
+├─ renderer/           Vue 3 渲染层
+│  └─ api/             IPC 调用的类型化封装（组件唯一出口）
+└─ shared/             主进程与渲染层共享的类型与常量
+   ├─ dto.ts           跨进程 DTO（字段含义的单一真相）
+   ├─ errors.ts        错误码 + IpcResult 信封
+   └─ ipc/             contract（契约）/ channels（白名单）/ schemas（zod）
+scripts/               环境自检、验收与本机环境适配脚本
+docs/                  产品文档 / 开发计划 / MVP 范围
 ```
+
+## 新增一个 IPC 通道
+
+固定五步，漏一步编译期就报错（这是刻意的）：
+
+1. `src/shared/dto.ts` — 定义入参 / 返回值类型
+2. `src/shared/ipc/contract.ts` — 在 `IpcMap` 里加 `{ input, output }`
+3. `src/shared/ipc/channels.ts` — 把通道名加进 `INVOKE_CHANNELS`（漏了会提示「漏掉了通道: xxx」）
+4. `src/shared/ipc/schemas.ts` — 加 zod schema（缺了 `registerHandler` 编译不过）
+5. `src/main/ipc/<域>.ts` — `registerHandler(...)`；渲染层走 `src/renderer/api/` 封装，不要直接 `window.api`
+
 
 ## 已知环境问题
 

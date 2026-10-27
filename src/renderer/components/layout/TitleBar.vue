@@ -1,18 +1,18 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import AppIcon from '@/components/common/AppIcon.vue'
+import { windowApi } from '@/api'
 
 const maximized = ref(false)
 let off: (() => void) | undefined
 
-const win = () => window.api?.window
-
 onMounted(() => {
-  win()
-    ?.isMaximized()
-    .then((v) => (maximized.value = v))
+  // 先订阅再取初始值：两次窗口状态变化之间的窗口期不会漏事件
+  off = windowApi.onState((s) => (maximized.value = s.maximized))
+  windowApi
+    .getState()
+    .then((s) => (maximized.value = s.maximized))
     .catch(() => undefined)
-  off = win()?.onState((s) => (maximized.value = s.maximized))
 })
 
 onBeforeUnmount(() => off?.())
@@ -29,13 +29,13 @@ onBeforeUnmount(() => off?.())
     </div>
 
     <div class="app-no-drag flex h-full">
-      <button class="flex w-11 items-center justify-center text-dim transition-colors duration-120 hover:bg-hover hover:text-ink" title="最小化" @click="win()?.minimize()">
+      <button class="flex w-11 items-center justify-center text-dim transition-colors duration-120 hover:bg-hover hover:text-ink" title="最小化" @click="windowApi.minimize()">
         <AppIcon name="minimize" :size="14" />
       </button>
-      <button class="flex w-11 items-center justify-center text-dim transition-colors duration-120 hover:bg-hover hover:text-ink" :title="maximized ? '还原' : '最大化'" @click="win()?.toggleMaximize()">
+      <button class="flex w-11 items-center justify-center text-dim transition-colors duration-120 hover:bg-hover hover:text-ink" :title="maximized ? '还原' : '最大化'" @click="windowApi.toggleMaximize()">
         <AppIcon :name="maximized ? 'restore' : 'maximize'" :size="13" />
       </button>
-      <button class="flex w-11 items-center justify-center text-dim transition-colors duration-120 hover:bg-[#c42b1c] hover:text-white" title="关闭" @click="win()?.close()">
+      <button class="flex w-11 items-center justify-center text-dim transition-colors duration-120 hover:bg-[#c42b1c] hover:text-white" title="关闭" @click="windowApi.close()">
         <AppIcon name="close" :size="14" />
       </button>
     </div>

@@ -17,13 +17,15 @@
     "verify:db": "node scripts/verify-db.mjs",
     "rebuild:native": "electron-rebuild -f -o better-sqlite3 --build-from-source -d https://artifacts.electronjs.org/headers/dist",
     "setup:python": "node scripts/setup-python.mjs",
-    "postinstall": "pnpm rebuild:native"
+    "postinstall": "pnpm rebuild:native",
+    "verify:ipc": "node scripts/verify-ipc.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
     "pinia": "^2.3.0",
     "vue": "^3.5.13",
-    "vue-router": "^4.5.0"
+    "vue-router": "^4.5.0",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.2.1",

@@ -9,9 +9,11 @@ const alias = {
 
 export default defineConfig({
   main: {
+    resolve: { alias },
     plugins: [externalizeDepsPlugin()]
   },
   preload: {
+    resolve: { alias },
     plugins: [externalizeDepsPlugin()]
   },
   renderer: {
