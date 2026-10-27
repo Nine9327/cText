@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Toast 容器。挂在 App 根节点，固定右下角，不参与布局。
+ * Toast 容器。挂在 App 根节点，固定底部居中，不参与布局。
  *
  * 只用 pointer-events-none 包外层、单条 toast 再打开 pointer-events，
  * 这样它不会挡住下面的书籍卡片点击（阅读器里尤其重要）。
