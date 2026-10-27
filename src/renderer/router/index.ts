@@ -1,7 +1,17 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import LibraryView from '@/views/LibraryView.vue'
+import ShelvesView from '@/views/ShelvesView.vue'
+import SourcesView from '@/views/SourcesView.vue'
 import ComingSoonView from '@/views/ComingSoonView.vue'
 
+/**
+ * 路由表。五个侧栏入口各有独立去处（对齐产品文档 §2.2）：
+ *   /library   全部书籍（受当前书库根目录过滤）
+ *   /favorites 收藏的书籍
+ *   /shelves   我的书架总览 → /shelves/:shelfId 单个书架
+ *   /sources   网络小说总览 → /sources/:sourceId 单个书源
+ * 加 /reader、/settings 两个未实现页，空状态由 ComingSoonView 承担。
+ */
 export const router = createRouter({
   // Electron 用 file:// 加载，hash 模式最省事
   history: createWebHashHistory(),
@@ -20,6 +30,12 @@ export const router = createRouter({
       meta: { title: '收藏的书籍', view: 'favorites' }
     },
     {
+      path: '/shelves',
+      name: 'shelves',
+      component: ShelvesView,
+      meta: { title: '我的书架' }
+    },
+    {
       path: '/shelves/:shelfId',
       name: 'shelf',
       component: LibraryView,
@@ -28,13 +44,14 @@ export const router = createRouter({
     {
       path: '/sources',
       name: 'sources',
-      component: ComingSoonView,
-      meta: {
-        title: '网络小说',
-        desc: '书源导入、聚合搜索、章节缓存。书源规则对齐「阅读 3.0」格式。',
-        icon: 'search',
-        task: 'M4-01 ~ M4-12'
-      }
+      component: SourcesView,
+      meta: { title: '网络小说' }
+    },
+    {
+      path: '/sources/:sourceId',
+      name: 'source',
+      component: SourcesView,
+      meta: { title: '网络小说' }
     },
     {
       path: '/reader',

@@ -2,7 +2,7 @@
 
 本地优先、可接入网络书源的 Windows 桌面小说阅读器。把散落在多个硬盘 / 移动硬盘里的 TXT、EPUB 收进统一书库，像管理音乐一样管理小说，并支持导入「阅读 3.0」书源搜索网络小说。
 
-> **当前状态**：M0 骨架阶段。窗口外壳、侧栏、数据库层、IPC 框架、Python 桥接、日志/错误处理（M0-06）、打包流水线（M0-07）已完成，安装包可装可用；列表数据仍来自 `src/renderer/mock/library.ts`，文件导入与阅读器未实现。
+> **当前状态**：M0 骨架**已收口**（M0-00 ~ M0-08 全部完成）。窗口外壳、侧栏五入口、数据库层、IPC 框架、Python 桥接、日志/错误处理、打包流水线均已落地，安装包可装可用；列表与侧栏数据仍来自 `src/renderer/mock/library.ts`，文件导入与阅读器未实现（M1 / M2）。
 
 ## 平台
 
@@ -50,6 +50,7 @@ uv pip install -r python/ctext_worker/requirements.txt --python .venv/Scripts/py
 | `pnpm verify:ipc` | M0-04 IPC 验收（白名单、zod 校验、未实现占位、异常映射） |
 | `pnpm verify:bridge` | M0-05 Python 桥验收（帧解码、超时、杀进程自恢复、重启上限） |
 | `pnpm verify:log` | M0-06 日志验收（落盘、脱敏、级别、耗时、错误码映射、全局兜底 + toast） |
+| `pnpm verify:ui` | M0-08 侧栏验收（五入口切换、选中态唯一、书库过滤与离线态、两级折叠、空页面） |
 | `pnpm verify:package` | M0-07 打包验收（构建 → 解包目录 → 真跑一次自检）；加 `--installer` 连安装/卸载一起验 |
 | `pnpm build:worker` | 用 PyInstaller 把 Python worker 打成 `resources/python/ctext-worker/` |
 | `pnpm check:env` / `pnpm check:env:electron` | 环境自检 |
@@ -75,8 +76,10 @@ src/
 ├─ preload/            contextBridge 白名单，渲染层唯一入口
 ├─ renderer/           Vue 3 渲染层
 │  ├─ api/             IPC 调用的类型化封装（组件唯一出口）
+│  ├─ views/           页面：LibraryView（书库/收藏/书架共用）/ ShelvesView / SourcesView
+│  ├─ stores/          Pinia：library（根目录过滤与各入口集合）/ ui（折叠偏好）
 │  ├─ lib/             toast 状态、渲染层异常上报（log:renderer）
-│  └─ components/      标题栏 / 侧栏 / 通用组件（含 ToastHost）
+│  └─ components/      layout（TitleBar / Sidebar / LibrarySwitcher / SidebarSection）/ book / common
 └─ shared/             主进程与渲染层共享的类型与常量
    ├─ dto.ts           跨进程 DTO（字段含义的单一真相）
    ├─ errors.ts        错误码 + 默认文案 + IpcResult 信封
@@ -118,6 +121,27 @@ docs/                  产品文档 / 开发计划 / MVP 范围
 - **新增方法**：在 `python/ctext_worker/methods/` 下写 `@method("parse.txt.outline")` 函数，再到 `main.py` 里 `import` 该模块即可。
 
 健康状态可从渲染层读：`window.api.invoke('system:worker-health')`（永抛不错，未就绪时 `worker` 为 `null`）。
+
+## 界面骨架（M0-08）
+
+侧栏五个入口，全部可在折叠态以图标形式使用：
+
+| 入口 | 路由 | 说明 |
+| --- | --- | --- |
+| 书库切换器 | —（不跳转） | 下拉选根目录：全部书库 / 本地书库 `D://books` / 移动硬盘 `F://novels`（离线）。切换后侧栏计数、列表、收藏同时收敛 |
+| 全部书籍 | `/library` | 受当前根目录过滤；根目录离线时顶部出现离线横幅，书籍保留只变灰 |
+| 收藏的书籍 | `/favorites` | `books.favorite` 布尔，不是分组 |
+| 我的书架 | `/shelves` → `/shelves/:shelfId` | 多对多分组；分区标题可点，右侧箭头折叠 |
+| 网络小说 | `/sources` → `/sources/:sourceId` | 书源列表；页面明示「不内置、不分发任何书源」 |
+
+几条约定：
+
+- **选中态唯一**：三类样式 `.ct-nav-item-active`（展开）/ `.ct-rail-item-active`（折叠）/ `.ct-section-active`（分区首页标题），任何路由下有且只有一个。`pnpm verify:ui` 会逐个入口断言。
+- **侧栏 240px ↔ 64px**：折叠按钮在底部（展开态是左侧箭头，折叠态在最下方）。折叠态不隐藏入口，只是变成图标 + `title` 提示。
+- **折叠偏好存 localStorage**（`ctext.ui.v1`），不写库：它不是业务数据，写库要走 IPC 往返。
+- **当前根目录不持久化**：每次启动都是「全部书库」。避免"上次选了移动硬盘，这次拔盘开机看到空列表"。
+- **所有数据仍是 mock**（`src/renderer/mock/library.ts`，16 本书 / 3 个根目录 / 2 个书架 / 3 个书源）。M1-01 起换成 `roots:*` 与 `library:list`，侧栏组件不用动。
+- **未实现动作给 toast**，不假装成功：新建书架 → M3-02、导入书籍 → M1-06、导入书源 → M4-07、重新指定目录 → M1-01。
 
 ## 日志与错误处理（M0-06）
 

@@ -1,0 +1,215 @@
+/**
+ * M0-08 自检：在**真实渲染层**里点侧栏的五个入口，验证路由、选中态、过滤与折叠。
+ *
+ * 为什么不用截图像素比对：M0-08 的验收是「五个入口可切换，选中态与设计稿一致」，
+ * 前者是行为（点击 → 路由 → 高亮唯一），后者是样式类（`.ct-nav-*-active`）。
+ * 两者都能用 DOM 精确断言，比截图稳，也不会因为字体渲染差异误报。
+ *
+ * 只在 `!app.isPackaged && CTEXT_UI_SMOKE=1` 时由主进程调用。
+ * 断言脚本要求**干净的 userData**（localStorage 里的折叠状态会影响结果），
+ * 所以 verify-ui.mjs 每次都用 `--user-data-dir=<临时目录>` 启动。
+ */
+import { app, type BrowserWindow } from 'electron'
+
+interface SmokeItem {
+  name: string
+  ok: boolean
+  detail?: string
+}
+
+const UI_CASES = String.raw`
+(async () => {
+  const out = []
+  const push = (name, ok, detail) => out.push({ name, ok: !!ok, detail: detail == null ? '' : String(detail) })
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+  const q = (sel) => document.querySelector(sel)
+  const qa = (sel) => Array.from(document.querySelectorAll(sel))
+  const txt = (el) => (el && el.textContent ? el.textContent : '').replace(/\s+/g, ' ').trim()
+
+  const waitFor = async (fn, timeout = 6000) => {
+    const deadline = Date.now() + timeout
+    while (Date.now() < deadline) {
+      const value = fn()
+      if (value) return value
+      await sleep(50)
+    }
+    return null
+  }
+
+  // 侧栏选中态的三种形态：展开态 nav / 折叠态 rail / 分区首页标题
+  const ACTIVE = '.ct-nav-item-active, .ct-rail-item-active, .ct-section-active'
+  // 折叠态图标栏里没有文字，只能读 aria-label / title
+  const nameOf = (el) => txt(el) || el.getAttribute('aria-label') || el.getAttribute('title') || ''
+  const actives = () => qa(ACTIVE).map(nameOf)
+  const route = () => location.hash.replace(/^#/, '')
+  const click = async (sel) => {
+    const el = q(sel)
+    if (!el) throw new Error('未找到元素 ' + sel)
+    el.click()
+    // 路由切换 + Vue 重渲染 + 120ms 宽度过渡，220ms 够用且留了余量
+    await sleep(220)
+  }
+
+  /** 每个入口切换后都检查一次：有且只有一个选中项，且文案对得上 */
+  const checkActive = (label) => {
+    const list = actives()
+    push(
+      '选中态唯一：' + label,
+      list.length === 1 && list[0].includes(label),
+      list.length === 0 ? '无选中项' : list.join(' / ')
+    )
+  }
+
+  const checkRoute = (expected) => push('路由 = ' + expected, route() === expected, route())
+  const visible = (el) => !!el && el.checkVisibility({ checkOpacity: false, checkVisibilityCSS: true })
+
+  try {
+    const sidebar = await waitFor(() => q('[data-sidebar]'))
+    if (!sidebar) {
+      push('侧栏已渲染', false, '6s 内没有 [data-sidebar]')
+      return JSON.stringify(out)
+    }
+
+    // ---------------------------------------------------------------- 1. 结构
+    push('侧栏已渲染且默认展开', sidebar.getAttribute('data-collapsed') === '0' && sidebar.offsetWidth === 240, sidebar.offsetWidth + 'px')
+
+    const entries = [
+      ['书库切换器', '[data-library-switcher]'],
+      ['全部书籍', '[data-nav="library"]'],
+      ['收藏的书籍', '[data-nav="favorites"]'],
+      ['我的书架', '[data-nav="shelves"]'],
+      ['网络小说', '[data-nav="sources"]']
+    ]
+    const missing = entries.filter(([, sel]) => !q(sel)).map(([name]) => name)
+    push('五个入口齐全', missing.length === 0, missing.length ? '缺少 ' + missing.join('、') : '书库切换器 + 4 个入口')
+
+    await waitFor(() => route() === '/library' && q('[data-book-count]'))
+    checkRoute('/library')
+    checkActive('全部书籍')
+    push('首屏书库计数 16', txt(q('[data-book-count]')) === '16 本', txt(q('[data-book-count]')))
+
+    // ---------------------------------------------------------------- 2. 收藏
+    await click('[data-nav="favorites"]')
+    checkRoute('/favorites')
+    checkActive('收藏的书籍')
+    push('收藏页标题正确', txt(q('[data-page-title]')) === '收藏的书籍', txt(q('[data-page-title]')))
+    push('收藏计数 5', txt(q('[data-book-count]')) === '5 本', txt(q('[data-book-count]')))
+
+    // ---------------------------------------------------------------- 3. 我的书架
+    await click('[data-nav="shelves"]')
+    checkRoute('/shelves')
+    checkActive('我的书架')
+    const sectionColor = (() => {
+      const el = q('.ct-section-active')
+      return el ? getComputedStyle(el).color : ''
+    })()
+    push('分区首页选中态提亮到正文色', sectionColor === 'rgb(231, 233, 236)', sectionColor || '没有 .ct-section-active')
+    push('书架总览渲染 2 个书架', qa('[data-shelf-card]').length === 2, qa('[data-shelf-card]').length + ' 个')
+
+    await click('[data-shelf-item]')
+    checkRoute('/shelves/s1')
+    checkActive('睡前读物')
+    push('书架页标题是书架名', txt(q('[data-page-title]')) === '睡前读物', txt(q('[data-page-title]')))
+    push('书架内含 4 本', txt(q('[data-book-count]')) === '4 本', txt(q('[data-book-count]')))
+
+    // ---------------------------------------------------------------- 4. 网络小说
+    await click('[data-nav="sources"]')
+    checkRoute('/sources')
+    checkActive('网络小说')
+    push('书源列表 3 条', qa('[data-source-row]').length === 3, qa('[data-source-row]').length + ' 条')
+
+    await click('[data-source-row]')
+    checkRoute('/sources/src1')
+    checkActive('示例书源 A')
+
+    // ---------------------------------------------------------------- 5. 书库切换器
+    await click('[data-nav="library"]')
+    await click('[data-library-switcher]')
+    push('切换器面板展开', !!q('[data-root-panel]'))
+    push('面板列出 3 个根目录', qa('[data-root-option]').length === 3, qa('[data-root-option]').length + ' 个')
+
+    await click('[data-root-id="r2"]')
+    push('面板选择后自动关闭', !q('[data-root-panel]'))
+    push('切换器显示新根目录', txt(q('[data-root-label]')) === '移动硬盘', txt(q('[data-root-label]')))
+    push('切到离线目录后列表只剩 4 本', txt(q('[data-book-count]')) === '4 本', txt(q('[data-book-count]')))
+    push('离线根目录出现离线横幅', !!q('[data-offline-hint]'), txt(q('[data-offline-hint]')).slice(0, 40))
+    push('离线目录里最近阅读整段隐藏', !q('[data-recent]'))
+    push('收藏计数随根目录收敛为 1', txt(q('[data-fav-count]')) === '1', txt(q('[data-fav-count]')))
+
+    await click('[data-library-switcher]')
+    await click('[data-root-id="all"]')
+    push('切回全部书库后横幅消失', !q('[data-offline-hint]'))
+    push('切回后恢复 16 本', txt(q('[data-book-count]')) === '16 本', txt(q('[data-book-count]')))
+    push('切回后最近阅读回来', !!q('[data-recent]'))
+
+    // ---------------------------------------------------------------- 6. 分区折叠
+    const shelfBody = () => q('[data-section="shelves"] [data-section-body]')
+    await click('[data-section-toggle="shelves"]')
+    push('折叠我的书架后子项不可见', !visible(shelfBody()), visible(shelfBody()) ? '仍可见' : '已折叠')
+    const saved = (() => {
+      try {
+        return JSON.parse(localStorage.getItem('ctext.ui.v1') || '{}')
+      } catch {
+        return {}
+      }
+    })()
+    push('折叠状态写入 localStorage', saved.sections && saved.sections.shelves === false, JSON.stringify(saved.sections || null))
+    await click('[data-section-toggle="shelves"]')
+    push('再次点击恢复展开', visible(shelfBody()))
+
+    // ---------------------------------------------------------------- 7. 侧栏折叠
+    await click('[data-sidebar-toggle]')
+    const rail = q('[data-sidebar]')
+    push('折叠后宽度 64px', rail && rail.getAttribute('data-collapsed') === '1' && rail.offsetWidth === 64, (rail ? rail.offsetWidth : 0) + 'px')
+    push(
+      '折叠态四个入口仍在',
+      ['library', 'favorites', 'shelves', 'sources'].every((key) => !!q('[data-nav="' + key + '"]'))
+    )
+    await click('[data-nav="favorites"]')
+    checkRoute('/favorites')
+    checkActive('收藏的书籍')
+    await click('[data-sidebar-toggle]')
+    push('展开后宽度恢复 240px', q('[data-sidebar]') && q('[data-sidebar]').offsetWidth === 240, (q('[data-sidebar]') ? q('[data-sidebar]').offsetWidth : 0) + 'px')
+
+    // ---------------------------------------------------------------- 8. 空页面与未实现提示
+    location.hash = '#/shelves/not-exist'
+    await sleep(300)
+    push('失效书架 id 显示空状态', !!q('[data-empty]') && txt(q('[data-empty-title]')) === '书架不存在', txt(q('[data-empty-title]')))
+
+    location.hash = '#/shelves'
+    await sleep(300)
+    await click('[data-shelf-create]')
+    const toast = await waitFor(() => q('[data-toast]'), 2000)
+    push('未实现动作给出 toast 提示', !!toast && txt(toast).includes('M3-02'), toast ? txt(toast) : '未出现 toast')
+  } catch (err) {
+    push('自检脚本执行', false, err && err.message ? err.message : String(err))
+  }
+
+  return JSON.stringify(out)
+})()
+`
+
+export async function runUiSmoke(win: BrowserWindow): Promise<void> {
+  await new Promise<void>((resolve) => {
+    if (!win.webContents.isLoading()) return resolve()
+    win.webContents.once('did-finish-load', () => resolve())
+    win.webContents.once('did-fail-load', () => resolve())
+  })
+
+  let items: SmokeItem[] = []
+  try {
+    const raw = (await win.webContents.executeJavaScript(UI_CASES)) as string
+    items = JSON.parse(raw) as SmokeItem[]
+  } catch (err) {
+    items = [{ name: '自检脚本执行', ok: false, detail: err instanceof Error ? err.message : String(err) }]
+  }
+
+  for (const item of items) {
+    console.log(`SMOKE UI ${item.ok ? 'PASS' : 'FAIL'} ${item.name}${item.detail ? ` (${item.detail})` : ''}`)
+  }
+  const failed = items.filter((item) => !item.ok).length
+  console.log(`SMOKE UI SUMMARY ${items.length - failed}/${items.length}`)
+
+  win.destroy()
+  app.exit(failed === 0 && items.length > 0 ? 0 : 1)
+}

@@ -107,7 +107,21 @@
     @apply bg-active text-ink;
   }
 
+  /* 折叠态图标栏：正方形按钮，active 与展开态共用同一套底色 */
+  .ct-rail-item {
+    @apply inline-flex h-9 w-9 items-center justify-center rounded-md text-dim transition-colors duration-120 hover:bg-hover hover:text-ink;
+  }
+
+  .ct-rail-item-active {
+    @apply bg-active text-ink;
+  }
+
   .ct-section-title {
-    @apply px-2.5 text-[11px] font-medium tracking-wider text-faint;
+    @apply text-[11px] font-medium tracking-wider text-faint;
+  }
+
+  /* 分区首页被选中时（/shelves、/sources）：只提亮标题，不抢子项的选中底色 */
+  .ct-section-active {
+    @apply text-ink;
   }
 }

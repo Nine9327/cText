@@ -1,8 +1,24 @@
 /**
- * UI 骨架用的假数据。M1 起替换为 library:list 的返回。
+ * UI 骨架用的假数据。M1 起替换为 library:list / roots:list 的返回。
+ *
+ * 这里刻意把「根目录 → 书籍」「书架 → 书籍」「收藏 → 书籍」三种关系都建出来，
+ * 因为侧栏骨架的选中态与过滤行为只有在关系成立时才能验：
+ *   - 根目录离线 → 其下书籍全部 offline（产品文档 §2.3）
+ *   - 收藏是书籍的一个布尔属性（books.favorite），不是分组
+ *   - 书架是多对多分组，同一本书可以同时在多个书架
  */
 
 export type ReadState = 'unread' | 'reading' | 'finished' | 'offline'
+
+/** 书库根目录：一个可独立上下线的挂载点 */
+export interface MockRoot {
+  id: string
+  /** 侧栏显示名 */
+  label: string
+  /** 真实路径；「全部书库」为空串 */
+  path: string
+  online: boolean
+}
 
 export interface MockBook {
   id: string
@@ -13,7 +29,17 @@ export interface MockBook {
   progress: number
   format: 'txt' | 'epub'
   cover: { from: string; to: string }
+  /** 所属根目录（books 表只存 root_id + rel_path，不存绝对路径） */
+  rootId: string
 }
+
+export const ALL_ROOTS_ID = 'all'
+
+export const mockRoots: MockRoot[] = [
+  { id: ALL_ROOTS_ID, label: '全部书库', path: '', online: true },
+  { id: 'r1', label: '本地书库', path: 'D:\\books', online: true },
+  { id: 'r2', label: '移动硬盘', path: 'F:\\novels', online: false }
+]
 
 export const mockBooks: MockBook[] = [
   {
@@ -23,6 +49,7 @@ export const mockBooks: MockBook[] = [
     state: 'reading',
     progress: 0.42,
     format: 'epub',
+    rootId: 'r1',
     cover: { from: '#8a6a52', to: '#4a3628' }
   },
   {
@@ -32,6 +59,7 @@ export const mockBooks: MockBook[] = [
     state: 'reading',
     progress: 0.18,
     format: 'epub',
+    rootId: 'r1',
     cover: { from: '#2f4f6f', to: '#18293a' }
   },
   {
@@ -41,6 +69,7 @@ export const mockBooks: MockBook[] = [
     state: 'unread',
     progress: 0,
     format: 'epub',
+    rootId: 'r1',
     cover: { from: '#7a2f2f', to: '#3a1414' }
   },
   {
@@ -50,6 +79,7 @@ export const mockBooks: MockBook[] = [
     state: 'unread',
     progress: 0,
     format: 'epub',
+    rootId: 'r1',
     cover: { from: '#3d4a3a', to: '#1d241c' }
   },
   {
@@ -59,6 +89,7 @@ export const mockBooks: MockBook[] = [
     state: 'reading',
     progress: 0.63,
     format: 'txt',
+    rootId: 'r1',
     cover: { from: '#3a5a7a', to: '#17293a' }
   },
   {
@@ -68,6 +99,7 @@ export const mockBooks: MockBook[] = [
     state: 'unread',
     progress: 0,
     format: 'txt',
+    rootId: 'r1',
     cover: { from: '#8a6a2f', to: '#3f2f14' }
   },
   {
@@ -77,6 +109,7 @@ export const mockBooks: MockBook[] = [
     state: 'finished',
     progress: 1,
     format: 'epub',
+    rootId: 'r1',
     cover: { from: '#5a4a6a', to: '#2a2136' }
   },
   {
@@ -86,8 +119,10 @@ export const mockBooks: MockBook[] = [
     state: 'unread',
     progress: 0,
     format: 'txt',
+    rootId: 'r1',
     cover: { from: '#1f3a4a', to: '#0d1a22' }
   },
+  // ---- 以下 4 本在移动硬盘上；该根目录离线，所以全部 offline ----
   {
     id: 'b09',
     title: '平凡的世界',
@@ -95,35 +130,40 @@ export const mockBooks: MockBook[] = [
     state: 'offline',
     progress: 0.35,
     format: 'txt',
+    rootId: 'r2',
     cover: { from: '#6a5236', to: '#2f2317' }
   },
   {
     id: 'b10',
     title: '白夜行',
     author: '东野圭吾',
-    state: 'unread',
+    state: 'offline',
     progress: 0,
     format: 'epub',
+    rootId: 'r2',
     cover: { from: '#3a3a4a', to: '#16161f' }
   },
   {
     id: 'b11',
     title: '万历十五年',
     author: '黄仁宇',
-    state: 'unread',
+    state: 'offline',
     progress: 0,
     format: 'epub',
+    rootId: 'r2',
     cover: { from: '#7a5a3a', to: '#33241a' }
   },
   {
     id: 'b12',
     title: '局外人',
     author: '阿尔贝·加缪',
-    state: 'unread',
+    state: 'offline',
     progress: 0,
     format: 'epub',
+    rootId: 'r2',
     cover: { from: '#4a5a5a', to: '#1f2626' }
   },
+  // ---- 回到本地书库 ----
   {
     id: 'b13',
     title: '深入理解计算机系统（第3版）',
@@ -131,6 +171,7 @@ export const mockBooks: MockBook[] = [
     state: 'reading',
     progress: 0.09,
     format: 'epub',
+    rootId: 'r1',
     cover: { from: '#2f3a5a', to: '#141a29' }
   },
   {
@@ -140,6 +181,7 @@ export const mockBooks: MockBook[] = [
     state: 'unread',
     progress: 0,
     format: 'txt',
+    rootId: 'r1',
     cover: { from: '#6a3a2f', to: '#2b1512' }
   },
   {
@@ -149,6 +191,7 @@ export const mockBooks: MockBook[] = [
     state: 'unread',
     progress: 0,
     format: 'epub',
+    rootId: 'r1',
     cover: { from: '#8a6a2f', to: '#3a2a10' }
   },
   {
@@ -158,37 +201,39 @@ export const mockBooks: MockBook[] = [
     state: 'unread',
     progress: 0,
     format: 'epub',
+    rootId: 'r1',
     cover: { from: '#4a5a3a', to: '#1e2416' }
   }
 ]
 
+/**
+ * 收藏是 `books.favorite` 布尔，不是分组。
+ * 刻意包含一本离线书（b09），用来验证收藏列表里也要显示离线角标。
+ */
+export const favoriteIds: readonly string[] = ['b01', 'b03', 'b07', 'b09', 'b13']
+
 export interface MockShelf {
   id: string
   name: string
-  count: number
+  /** 多对多：同一本书可以在多个书架里 */
+  bookIds: string[]
 }
 
 export const mockShelves: MockShelf[] = [
-  { id: 's1', name: '睡前读物', count: 4 },
-  { id: 's2', name: '技术书', count: 3 }
+  { id: 's1', name: '睡前读物', bookIds: ['b03', 'b10', 'b12', 'b14'] },
+  { id: 's2', name: '技术书', bookIds: ['b02', 'b13', 'b01'] }
 ]
 
 export interface MockSource {
   id: string
   name: string
   enabled: boolean
+  /** 书源分组（Legado 的 bookSourceGroup） */
+  group: string
 }
 
 export const mockSources: MockSource[] = [
-  { id: 'src1', name: '示例书源 A', enabled: true },
-  { id: 'src2', name: '示例书源 B', enabled: true },
-  { id: 'src3', name: '示例书源 C', enabled: false }
+  { id: 'src1', name: '示例书源 A', enabled: true, group: '默认' },
+  { id: 'src2', name: '示例书源 B', enabled: true, group: '默认' },
+  { id: 'src3', name: '示例书源 C', enabled: false, group: '备用' }
 ]
-
-export const librarySummary = {
-  total: mockBooks.length,
-  favorite: 5
-}
-
-/** 最近阅读：取有进度的前三本 */
-export const recentBooks = mockBooks.filter((b) => b.progress > 0).slice(0, 3)

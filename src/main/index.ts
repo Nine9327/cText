@@ -13,6 +13,7 @@ import { runIpcSmoke } from './ipc/smoke'
 import { registerSystemIpc } from './ipc/system'
 import { attachWindowStateEvents, registerWindowIpc } from './ipc/window'
 import { runPackageSmoke } from './package/smoke'
+import { runUiSmoke } from './ui/smoke'
 import {
   applyStartupSwitches,
   installBootWatchdog,
@@ -292,6 +293,12 @@ if (!gotLock) {
       const code = await runBridgeSmoke(mainWindow)
       await disposePythonBridge()
       app.exit(code)
+      return
+    }
+
+    // M0-08 自检：侧栏五个入口、选中态唯一性、书库根目录过滤、两个折叠、空页面
+    if (!app.isPackaged && mainWindow && process.env['CTEXT_UI_SMOKE'] === '1') {
+      await runUiSmoke(mainWindow)
       return
     }
 

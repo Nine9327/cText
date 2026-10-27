@@ -6,6 +6,9 @@ export type IconName =
   | 'plus'
   | 'chevron-down'
   | 'chevron-right'
+  | 'chevron-left'
+  | 'globe'
+  | 'layers'
   | 'search'
   | 'sort'
   | 'import'
@@ -31,6 +34,9 @@ export const iconPaths: Record<IconName, string> = {
   plus: 'M12 5v14M5 12h14',
   'chevron-down': 'm6.5 9.5 5.5 5.5 5.5-5.5',
   'chevron-right': 'm9.5 6.5 5.5 5.5-5.5 5.5',
+  'chevron-left': 'm14.5 6.5-5.5 5.5 5.5 5.5',
+  globe: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM3 12h18M12 3c2.4 2.5 3.8 5.6 3.8 9s-1.4 6.5-3.8 9c-2.4-2.5-3.8-5.6-3.8-9S9.6 5.5 12 3Z',
+  layers: 'M12 3.6 3.6 8 12 12.4 20.4 8 12 3.6ZM3.6 12.4 12 16.8l8.4-4.4M3.6 16.8 12 21.2l8.4-4.4',
   search: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14Zm10.2 17.2L16 16',
   sort: 'M7 4v15M4 16.5 7 20l3-3.5M17 20V5M14 7.5 17 4l3 3.5',
   import:

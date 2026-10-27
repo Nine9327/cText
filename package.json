@@ -23,6 +23,7 @@
     "verify:ipc": "node scripts/verify-ipc.mjs",
     "verify:bridge": "node scripts/verify-bridge.mjs",
     "verify:log": "node scripts/verify-log.mjs",
+    "verify:ui": "node scripts/verify-ui.mjs",
     "make:icons": ".venv\\Scripts\\python.exe scripts/make-icons.py",
     "build:worker": "node scripts/build-worker.mjs",
     "dist:dir": "electron-vite build && node scripts/dist.mjs --win --dir",
