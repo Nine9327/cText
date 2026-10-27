@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import ToastHost from '@/components/common/ToastHost.vue'
 import TitleBar from '@/components/layout/TitleBar.vue'
 import Sidebar from '@/components/layout/Sidebar.vue'
 </script>
@@ -12,5 +13,6 @@ import Sidebar from '@/components/layout/Sidebar.vue'
         <RouterView />
       </main>
     </div>
+    <ToastHost />
   </div>
 </template>

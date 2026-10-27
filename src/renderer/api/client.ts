@@ -7,7 +7,15 @@
  *   3. 将来加埋点 / 重试 / 超时，只改这一个文件
  */
 import { ERROR_CODES, type AppErrorPayload, type FieldError } from '@shared/errors'
-import type { IpcChannel, IpcEventChannel, IpcEvents, IpcInput, IpcOutput, IpcSendChannel } from '@shared/ipc/contract'
+import type {
+  IpcChannel,
+  IpcEventChannel,
+  IpcEvents,
+  IpcInput,
+  IpcOutput,
+  IpcSendChannel,
+  IpcSends
+} from '@shared/ipc/contract'
 
 export class ApiError extends Error {
   readonly code: string
@@ -29,6 +37,9 @@ export class ApiError extends Error {
 /** 无入参通道允许省略第二个参数 */
 type InputArgs<K extends IpcChannel> = IpcInput<K> extends void ? [] : [IpcInput<K>]
 
+/** 单向消息同理：payload 为 void 的通道不传第二个参数 */
+type SendArgs<K extends IpcSendChannel> = IpcSends[K] extends void ? [] : [IpcSends[K]]
+
 function bridge(): NonNullable<Window['api']> {
   const api = window.api
   if (!api) {
@@ -46,8 +57,8 @@ export async function call<K extends IpcChannel>(channel: K, ...args: InputArgs<
   return result.data
 }
 
-export function send<K extends IpcSendChannel>(channel: K): void {
-  bridge().send(channel)
+export function send<K extends IpcSendChannel>(channel: K, ...args: SendArgs<K>): void {
+  bridge().send(channel, args[0] as IpcSends[K])
 }
 
 export function on<K extends IpcEventChannel>(channel: K, cb: (payload: IpcEvents[K]) => void): () => void {

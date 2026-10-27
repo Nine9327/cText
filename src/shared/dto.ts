@@ -359,6 +359,8 @@ export interface AppInfoDTO {
   isDev: boolean
   userDataPath: string
   dbPath: string
+  /** 日志目录（M0-06 起）。「关于」页与问题反馈要展示它，用户直接去这里取日志 */
+  logDir: string
 }
 
 export interface EchoRequest {
@@ -417,6 +419,21 @@ export interface ToastDTO {
   message: string
   /** 关联的错误码，UI 可展示便于用户反馈 */
   code?: string
+}
+
+/**
+ * 渲染层转交主进程落盘的一条日志（M0-06）。
+ *
+ * 只允许这几个字段：渲染层是唯一可能被注入的一侧，
+ * 主进程侧会再做一次级别白名单与长度截断（见 main/ipc/log.ts）。
+ */
+export interface RendererLogDTO {
+  level: 'debug' | 'info' | 'warn' | 'error'
+  message: string
+  /** 产生位置，如 'vue:render'、'window.onerror'、'unhandledrejection' */
+  source?: string
+  stack?: string
+  url?: string
 }
 
 export interface RootsChangedDTO {

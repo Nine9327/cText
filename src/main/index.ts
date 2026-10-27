@@ -1,15 +1,30 @@
-import { app, BrowserWindow, dialog, screen, session, shell } from 'electron'
+import { app, BrowserWindow, screen, session, shell } from 'electron'
 import { join } from 'node:path'
 import { disposePythonBridge, getPythonBridge } from './bridge'
 import { runBridgeSmoke } from './bridge/smoke'
 import { closeDatabase, initDatabase } from './db/connection'
 import { runDbSmoke } from './db/smoke'
+import { installGlobalErrorHandlers, reportFatal } from './errors/install'
+import { createLogger, initLogging, shutdownLogging } from './log'
+import { runLogSmoke } from './log/smoke'
+import { registerLogIpc } from './ipc/log'
 import { installIpc } from './ipc/registry'
 import { runIpcSmoke } from './ipc/smoke'
 import { registerSystemIpc } from './ipc/system'
 import { attachWindowStateEvents, registerWindowIpc } from './ipc/window'
 
 const isDev = !app.isPackaged
+
+/**
+ * M0-06：日志必须最早初始化。
+ * `app.getPath` 在 ready 之前就可用，所以这里放在模块顶层——
+ * 之后任何一个模块的 createLogger 都能直接落盘，不会漏掉启动阶段。
+ */
+initLogging({ dir: join(app.getPath('userData'), 'logs') })
+const log = createLogger('app')
+
+/** 兜底要在任何业务代码之前生效，否则启动阶段的异常没人接 */
+installGlobalErrorHandlers()
 
 /**
  * 本机（含虚拟显示适配器与安全软件）环境下 Chromium 的子进程沙箱不可用：
@@ -184,9 +199,21 @@ if (!gotLock) {
   app.whenReady().then(async () => {
     applyCsp()
 
+    log.info('cText 启动', {
+      version: app.getVersion(),
+      electron: process.versions.electron ?? '',
+      chrome: process.versions.chrome ?? '',
+      node: process.versions.node,
+      platform: process.platform,
+      arch: process.arch,
+      isDev,
+      userData: app.getPath('userData')
+    })
+
     // M0-04：先登记各域 handler，再由 registry 统一安装（未实现的通道装占位）
     registerWindowIpc()
     registerSystemIpc()
+    registerLogIpc()
     installIpc()
 
     // M0-03：数据库在窗口创建之前初始化，失败则不进入界面
@@ -194,11 +221,12 @@ if (!gotLock) {
     try {
       const { migration } = initDatabase(dbFile)
       if (migration.applied.length > 0) {
-        console.log(`[db] ${dbFile} 已迁移 ${migration.from} → ${migration.to}`)
+        log.info('数据库已迁移', { file: dbFile, from: migration.from, to: migration.to })
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      dialog.showErrorBox('数据库初始化失败', `${dbFile}\n\n${message}`)
+      // 库建不起来等于什么都做不了，仍然用系统对话框（此时界面还不存在，toast 无处可弹）
+      reportFatal('数据库初始化失败', `${dbFile}\n\n${message}`, err)
       app.quit()
       return
     }
@@ -216,6 +244,12 @@ if (!gotLock) {
     }
 
     createWindow()
+
+    // M0-06 自检：日志落盘 / 脱敏 / 级别 / 耗时 / 错误码映射 / 全局兜底
+    if (!app.isPackaged && mainWindow && process.env['CTEXT_LOG_SMOKE'] === '1') {
+      await runLogSmoke(mainWindow)
+      return
+    }
 
     // M0-05：worker 在后台拉起，不阻塞窗口（冷启动 ≤2s 的要求）。失败只影响解析，
     // 不影响浏览已有数据，所以这里不等它、也不因它退出应用。
@@ -250,5 +284,8 @@ if (!gotLock) {
   app.on('will-quit', () => {
     closeDatabase()
     void disposePythonBridge()
+    // 最后一步：关掉日志句柄。写是同步的，所以这之前的所有行都已在磁盘上
+    log.info('cText 退出')
+    shutdownLogging()
   })
 }

@@ -66,7 +66,8 @@ export const EVENT_CHANNELS = defineChannels<IpcEventChannel>()([
 export const SEND_CHANNELS = defineChannels<IpcSendChannel>()([
   'window:minimize',
   'window:toggle-maximize',
-  'window:close'
+  'window:close',
+  'log:renderer'
 ])
 
 /** preload 与主进程共用的 O(1) 白名单 */

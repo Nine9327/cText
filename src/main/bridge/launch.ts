@@ -12,7 +12,7 @@
 import { app } from 'electron'
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { createLogger } from '../utils/log'
+import { createLogger } from '../log'
 import type { BridgeLaunch } from './PythonBridge'
 
 const log = createLogger('worker')

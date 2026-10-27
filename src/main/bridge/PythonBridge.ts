@@ -14,7 +14,7 @@
  */
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { AppError, ERROR_CODES } from '@shared/errors'
-import { createLogger } from '../utils/log'
+import { createLogger } from '../log'
 import {
   NdjsonDecoder,
   encodeRequest,
@@ -49,6 +49,11 @@ export interface BridgeOptions extends BridgeLaunch {
   restartDelaysMs?: number[]
   /** worker 主动推来的事件（导入进度等） */
   onEvent?: (event: string, data: unknown) => void
+  /**
+   * 进入 failed（不再自动重启）时回调一次。上层用它给用户一个 toast，
+   * 否则解析能力悄悄失效，用户只看到「导入失败」却不知道为什么。
+   */
+  onFail?: (message: string) => void
 }
 
 export interface BridgeStatus {
@@ -84,8 +89,8 @@ const DEFAULTS = {
 }
 
 export class PythonBridge {
-  private readonly opts: Required<Omit<BridgeOptions, 'env' | 'onEvent'>> &
-    Pick<BridgeOptions, 'env' | 'onEvent'>
+  private readonly opts: Required<Omit<BridgeOptions, 'env' | 'onEvent' | 'onFail'>> &
+    Pick<BridgeOptions, 'env' | 'onEvent' | 'onFail'>
 
   private child: ChildProcessWithoutNullStreams | null = null
   private decoder = new NdjsonDecoder()
@@ -422,9 +427,14 @@ export class PythonBridge {
     this._state = 'failed'
     this._lastError = message
     this._worker = null
-    log.error(message)
+    log.error('worker 不可用', { reason: message, restarts: this._restarts })
     this.rejectPending(new AppError(ERROR_CODES.io, 'Python worker 不可用'))
     this.rejectWaiters(new AppError(ERROR_CODES.io, message))
+    try {
+      this.opts.onFail?.(message)
+    } catch {
+      // 上层回调自己炸了不能影响状态机
+    }
   }
 
   private waitReady(timeoutMs: number): Promise<void> {

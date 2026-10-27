@@ -26,6 +26,35 @@ export const ERROR_CODES = {
 
 export type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES]
 
+/**
+ * 错误码 → 默认中文文案（M0-06 统一映射）。
+ *
+ * 三层共用同一份文案：
+ *   - 主进程把底层错误（errno / SQLITE_* / 未知异常）收敛成 AppError 时兜底；
+ *   - 渲染层在没拿到具体 message 时用它兜底；
+ *   - 将来「错误码对照表」文档与问题反馈面板直接引它，不再手抄一遍。
+ *
+ * 文案原则：说清「发生了什么」+「用户能做什么」，不出现堆栈、SQL、绝对路径。
+ */
+export const ERROR_MESSAGES: Record<ErrorCode, string> = {
+  E_INVALID_ARGUMENT: '请求参数不合法',
+  E_NOT_FOUND: '内容不存在，可能已被移动或删除',
+  E_NOT_IMPLEMENTED: '该功能尚未实现',
+  E_CONFLICT: '数据冲突，请刷新后重试',
+  E_IO: '读写失败，请检查磁盘或权限',
+  E_TIMEOUT: '操作超时，请稍后重试',
+  E_INTERNAL: '内部错误，请查看日志'
+}
+
+export function isErrorCode(value: string): value is ErrorCode {
+  return Object.prototype.hasOwnProperty.call(ERROR_MESSAGES, value)
+}
+
+/** 取错误码对应的默认文案；未知码回落到 E_INTERNAL 的文案 */
+export function messageOf(code: string): string {
+  return isErrorCode(code) ? ERROR_MESSAGES[code] : ERROR_MESSAGES.E_INTERNAL
+}
+
 /** zod 校验失败的字段级明细 */
 export interface FieldError {
   /** 字段路径，如 "payload.message"；顶层字段为 "message" */

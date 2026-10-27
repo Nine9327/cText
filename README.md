@@ -2,7 +2,7 @@
 
 本地优先、可接入网络书源的 Windows 桌面小说阅读器。把散落在多个硬盘 / 移动硬盘里的 TXT、EPUB 收进统一书库，像管理音乐一样管理小说，并支持导入「阅读 3.0」书源搜索网络小说。
 
-> **当前状态**：M0 骨架阶段。窗口外壳、侧栏、数据库层、IPC 框架、Python 桥接已完成；列表数据仍来自 `src/renderer/mock/library.ts`，文件导入与阅读器未实现。
+> **当前状态**：M0 骨架阶段。窗口外壳、侧栏、数据库层、IPC 框架、Python 桥接、日志/错误处理基础设施（M0-06）已完成；列表数据仍来自 `src/renderer/mock/library.ts`，文件导入与阅读器未实现。
 
 ## 平台
 
@@ -49,6 +49,7 @@ uv pip install -r python/ctext_worker/requirements.txt --python .venv/Scripts/py
 | `pnpm verify:db` | M0-03 数据库验收（建库、迁移幂等、约束、FTS 触发器） |
 | `pnpm verify:ipc` | M0-04 IPC 验收（白名单、zod 校验、未实现占位、异常映射） |
 | `pnpm verify:bridge` | M0-05 Python 桥验收（帧解码、超时、杀进程自恢复、重启上限） |
+| `pnpm verify:log` | M0-06 日志验收（落盘、脱敏、级别、耗时、错误码映射、全局兜底 + toast） |
 | `pnpm check:env` / `pnpm check:env:electron` | 环境自检 |
 | `pnpm rebuild:native` | 手动按 Electron ABI 重建原生模块 |
 | `pnpm setup:python` | 建立仓库内 Python 3.11 与虚拟环境 |
@@ -59,17 +60,21 @@ uv pip install -r python/ctext_worker/requirements.txt --python .venv/Scripts/py
 ```
 src/
 ├─ main/               主进程
-│  ├─ index.ts         app 生命周期、单实例锁、窗口创建
-│  ├─ ipc/             通道注册（registry / system / window）+ 冒烟
+│  ├─ index.ts         app 生命周期、单实例锁、窗口创建、日志/兜底初始化
+│  ├─ ipc/             通道注册（registry / system / window / log）+ 冒烟
 │  ├─ db/              连接、PRAGMA、版本化迁移、DDL
 │  ├─ bridge/          Python worker：进程管理、NDJSON 协议、定位启动命令
-│  └─ utils/           作用域日志（M0-06 换成结构化日志）
+│  ├─ log/             结构化日志：JSON Lines 落盘、按天滚动、级别过滤、计时
+│  ├─ errors/          全局异常兜底（uncaughtException / 渲染进程退出 / preload 失败…）
+│  └─ utils/           脱敏（redact）、错误码映射（to-app-error）、toast 推送（notify）
 ├─ preload/            contextBridge 白名单，渲染层唯一入口
 ├─ renderer/           Vue 3 渲染层
-│  └─ api/             IPC 调用的类型化封装（组件唯一出口）
+│  ├─ api/             IPC 调用的类型化封装（组件唯一出口）
+│  ├─ lib/             toast 状态、渲染层异常上报（log:renderer）
+│  └─ components/      标题栏 / 侧栏 / 通用组件（含 ToastHost）
 └─ shared/             主进程与渲染层共享的类型与常量
    ├─ dto.ts           跨进程 DTO（字段含义的单一真相）
-   ├─ errors.ts        错误码 + IpcResult 信封
+   ├─ errors.ts        错误码 + 默认文案 + IpcResult 信封
    └─ ipc/             contract（契约）/ channels（白名单）/ schemas（zod）
 python/ctext_worker/   Python 解析侧车（stdin/stdout NDJSON，只解析本地文件，不联网不碰 DB）
 scripts/               环境自检、验收与本机环境适配脚本
@@ -104,6 +109,27 @@ docs/                  产品文档 / 开发计划 / MVP 范围
 - **新增方法**：在 `python/ctext_worker/methods/` 下写 `@method("parse.txt.outline")` 函数，再到 `main.py` 里 `import` 该模块即可。
 
 健康状态可从渲染层读：`window.api.invoke('system:worker-health')`（永抛不错，未就绪时 `worker` 为 `null`）。
+
+## 日志与错误处理（M0-06）
+
+**日志落在** `%APPDATA%\ctext\logs\ctext-YYYY-MM-DD.log`（即 `userData/logs`，`system:info` 的 `logDir` 字段也能取到）。按天滚动，保留 7 天，单文件 16MB 上限。
+
+**格式**：JSON Lines，一行一条。固定字段 `ts / level / scope / msg / pid / seq / session`，其余统一进 `fields`：
+
+```jsonc
+{"ts":"2026-10-27T10:29:46.939Z","level":"error","scope":"worker","msg":"worker 不可用","pid":12456,"seq":28,"session":"85d2cbb3","fields":{"reason":"…","restarts":3}}
+```
+
+**级别**：`CTEXT_LOG_LEVEL=debug|info|warn|error`，默认 `info`。`debug` 含每条 IPC 的耗时，排障时才开。
+
+**脱敏在写入点做**，不是导出时才做：`C:\Users\<用户名>` → `C:\Users\~`、`/home|/Users/<用户名>` 同理、`Bearer xxx` 与 `?token=/key=/secret=/password=` → `***`。控制台回声与文件内容同步脱敏，所以贴日志到 issue 不会泄漏用户名。
+
+**写文件是同步的**（`fs.writeSync`）。这样 `app.exit()` 与未捕获异常两条路径都不会丢掉最后几行——而这恰恰是最需要的那几行。
+
+**错误与提示**：
+- 7 个错误码（`E_INVALID_ARGUMENT` / `E_NOT_FOUND` / `E_NOT_IMPLEMENTED` / `E_CONFLICT` / `E_IO` / `E_TIMEOUT` / `E_INTERNAL`），底层 errno / `SQLITE_*` / zod 由 `src/main/utils/to-app-error.ts` 统一映射，文案单一来源在 `shared/errors.ts` 的 `ERROR_MESSAGES`。
+- 未捕获异常（主进程或渲染层）都会落日志 + 弹右下角 toast；渲染层的异常经 `log:renderer` 通道转发到**同一个**日志文件。
+- 主进程不会因为单个 `uncaughtException` 退出；但 10 秒内超过 5 次会判定状态不可信并主动退出。
 
 ## 已知环境问题
 

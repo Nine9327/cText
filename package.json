@@ -19,7 +19,8 @@
     "setup:python": "node scripts/setup-python.mjs",
     "postinstall": "pnpm rebuild:native",
     "verify:ipc": "node scripts/verify-ipc.mjs",
-    "verify:bridge": "node scripts/verify-bridge.mjs"
+    "verify:bridge": "node scripts/verify-bridge.mjs",
+    "verify:log": "node scripts/verify-log.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

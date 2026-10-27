@@ -12,11 +12,20 @@
  */
 import { BrowserWindow, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 import type { ZodType } from 'zod'
-import { ERROR_CODES, AppError, isAppError, type AppErrorPayload, type FieldError, type IpcResult } from '@shared/errors'
-import type { IpcChannel, IpcEventChannel, IpcEvents, IpcInput, IpcOutput, IpcSendChannel } from '@shared/ipc/contract'
+import { ERROR_CODES, type AppErrorPayload, type FieldError, type IpcResult } from '@shared/errors'
+import type {
+  IpcChannel,
+  IpcEventChannel,
+  IpcEvents,
+  IpcInput,
+  IpcOutput,
+  IpcSendChannel,
+  IpcSends
+} from '@shared/ipc/contract'
 import { INVOKE_CHANNELS, SEND_CHANNELS } from '@shared/ipc/channels'
 import { ipcSchemas, type ValidatedChannel } from '@shared/ipc/schemas'
-import { createLogger } from '../utils/log'
+import { createLogger } from '../log'
+import { toAppError } from '../utils/to-app-error'
 
 const log = createLogger('ipc')
 
@@ -27,15 +36,21 @@ export interface IpcContext {
   startedAt: number
 }
 
+/** 单向消息（Renderer → Main）的上下文；payload 已在契约里声明过类型 */
+export interface IpcSendContext<K extends IpcSendChannel> {
+  window: BrowserWindow | null
+  payload: IpcSends[K]
+}
+
 export type IpcHandler<K extends IpcChannel> = (
   input: IpcInput<K>,
   ctx: IpcContext
 ) => IpcOutput<K> | Promise<IpcOutput<K>>
 
-export type IpcSendHandler = (ctx: { window: BrowserWindow | null }) => void
+export type IpcSendHandler<K extends IpcSendChannel> = (ctx: IpcSendContext<K>) => void
 
 const handlers = new Map<string, (input: unknown, ctx: IpcContext) => unknown>()
-const sendHandlers = new Map<string, IpcSendHandler>()
+const sendHandlers = new Map<string, (ctx: IpcSendContext<IpcSendChannel>) => void>()
 let installed = false
 
 /**
@@ -52,11 +67,11 @@ export function registerHandler<K extends ValidatedChannel>(channel: K, handler:
 }
 
 /** 注册 Renderer → Main 的单向消息 */
-export function registerSend<K extends IpcSendChannel>(channel: K, handler: IpcSendHandler): void {
+export function registerSend<K extends IpcSendChannel>(channel: K, handler: IpcSendHandler<K>): void {
   if (sendHandlers.has(channel)) {
     throw new Error(`IPC send 通道重复注册: ${channel}`)
   }
-  sendHandlers.set(channel, handler)
+  sendHandlers.set(channel, handler as IpcSendHandler<IpcSendChannel>)
 }
 
 /** 向指定窗口推事件（Main → Renderer） */
@@ -77,19 +92,34 @@ function fieldErrorsOf(issues: readonly { path: readonly PropertyKey[]; message:
   }))
 }
 
+/** 只保留入参的「形状」，避免把整段正文或大数组打进日志 */
+function summarizeInput(raw: unknown): unknown {
+  if (raw === undefined) return '(undefined)'
+  if (typeof raw === 'string') return raw.length > 200 ? `${raw.slice(0, 200)}…(${raw.length} 字)` : raw
+  return raw
+}
+
 /**
- * 未预期异常 → 对外错误载荷。
- * message 固定为通用文案，避免把 SQL、绝对路径、堆栈泄给渲染层；原文只进日志。
+ * 异常 → 对外错误载荷。
+ *
+ * 统一走 `toAppError`：底层英文 message（ENOENT / SQLITE_* / 堆栈）不会出现在载荷里，
+ * 只有 AppError 主动给出的业务文案才会透给渲染层。原始异常只进日志。
  */
 function toPayload(channel: string, err: unknown): AppErrorPayload {
-  if (isAppError(err)) return { code: err.code, message: err.message, fields: err.fields }
+  const appError = toAppError(err)
 
-  const detail = err instanceof Error ? err.stack ?? err.message : String(err)
-  log.error(`${channel} 未预期异常: ${detail}`)
+  if (appError.code === ERROR_CODES.internal) {
+    log.error(`${channel} 未预期异常`, { channel, error: err })
+  } else {
+    log.warn(`${channel} 业务失败 ${appError.code}`, { channel, code: appError.code, message: appError.message })
+  }
 
-  const payload: AppErrorPayload = { code: ERROR_CODES.internal, message: '内部错误，请查看日志' }
-  if (!process.env['NODE_ENV'] || process.env['NODE_ENV'] !== 'production') {
-    payload.stack = err instanceof Error ? err.stack : String(err)
+  const payload: AppErrorPayload = { code: appError.code, message: appError.message }
+  if (appError.fields && appError.fields.length > 0) payload.fields = appError.fields
+  // 堆栈只在开发态回传；生产态只剩「内部错误，请查看日志」+ 日志文件
+  const isProd = process.env['NODE_ENV'] === 'production'
+  if (!isProd && appError.code === ERROR_CODES.internal) {
+    payload.stack = err instanceof Error ? err.stack ?? err.message : String(err)
   }
   return payload
 }
@@ -120,19 +150,20 @@ async function invokeWith(
   const parsed = schema.safeParse(raw)
   if (!parsed.success) {
     const fields = fieldErrorsOf(parsed.error.issues)
-    log.warn(
-      `入参校验失败 ${channel} → ${fields.map((f) => `${f.path}: ${f.message}`).join(' | ')}`,
-      raw === undefined ? '(undefined)' : raw
-    )
+    log.warn(`入参校验失败 ${channel}`, {
+      channel,
+      code: ERROR_CODES.invalidArgument,
+      fields,
+      received: summarizeInput(raw)
+    })
     return { ok: false, error: { code: ERROR_CODES.invalidArgument, message: '参数校验失败', fields } }
   }
 
   try {
     const data = await handler(parsed.data, ctx)
-    log.debug(`${channel} ok ${(performance.now() - ctx.startedAt).toFixed(1)}ms`)
+    log.debug(`${channel} ok`, { channel, elapsedMs: Number((performance.now() - ctx.startedAt).toFixed(1)) })
     return { ok: true, data }
   } catch (err) {
-    log.error(`${channel} 执行失败: ${err instanceof AppError ? err.message : String(err)}`)
     return { ok: false, error: toPayload(channel, err) }
   }
 }
@@ -151,16 +182,16 @@ export function installIpc(): void {
   }
 
   for (const channel of SEND_CHANNELS) {
-    ipcMain.on(channel, (event: IpcMainEvent) => {
+    ipcMain.on(channel, (event: IpcMainEvent, payload: unknown) => {
       const handler = sendHandlers.get(channel)
       if (!handler) {
         log.warn(`${channel} 消息到达，但当前版本未实现`)
         return
       }
       try {
-        handler({ window: BrowserWindow.fromWebContents(event.sender) })
+        handler({ window: BrowserWindow.fromWebContents(event.sender), payload } as IpcSendContext<IpcSendChannel>)
       } catch (err) {
-        log.error(`${channel} 处理失败: ${err instanceof Error ? err.message : String(err)}`)
+        log.error(`${channel} 处理失败`, { channel, error: err })
       }
     })
   }

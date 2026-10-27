@@ -21,6 +21,7 @@ import type {
   ImportProgressDTO,
   Paged,
   ProgressDTO,
+  RendererLogDTO,
   RootDTO,
   RootsChangedDTO,
   ScanPreviewDTO,
@@ -104,6 +105,8 @@ export type IpcSends = {
   'window:minimize': void
   'window:toggle-maximize': void
   'window:close': void
+  /** 渲染层把未捕获异常 / 诊断信息转交主进程写进同一个日志文件（M0-06） */
+  'log:renderer': RendererLogDTO
 }
 
 export type IpcChannel = keyof IpcMap

@@ -9,6 +9,7 @@ import { app } from 'electron'
 import { join } from 'node:path'
 import type { WorkerHealthDTO } from '@shared/dto'
 import { getPythonBridge } from '../bridge'
+import { getLogDir } from '../log'
 import { registerHandler } from './registry'
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -40,7 +41,8 @@ export function registerSystemIpc(): void {
     arch: process.arch,
     isDev: !app.isPackaged,
     userDataPath: app.getPath('userData'),
-    dbPath: join(app.getPath('userData'), 'ctext.db')
+    dbPath: join(app.getPath('userData'), 'ctext.db'),
+    logDir: getLogDir() ?? join(app.getPath('userData'), 'logs')
   }))
 
   /**
