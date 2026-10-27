@@ -361,6 +361,10 @@ export interface AppInfoDTO {
   dbPath: string
   /** 日志目录（M0-06 起）。「关于」页与问题反馈要展示它，用户直接去这里取日志 */
   logDir: string
+  /** 是否运行在安全模式（关闭了 Chromium 沙箱）。问题反馈时要带上 */
+  safeMode: boolean
+  /** 进入安全模式的原因：dev / env / argv / fallback / none */
+  safeModeSource: string
 }
 
 export interface EchoRequest {

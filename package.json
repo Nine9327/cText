@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "description": "cText - 本地优先的 Windows 桌面小说阅读器",
+  "author": "cText",
+  "license": "UNLICENSED",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "node scripts/dev.mjs",
@@ -20,7 +22,12 @@
     "postinstall": "pnpm rebuild:native",
     "verify:ipc": "node scripts/verify-ipc.mjs",
     "verify:bridge": "node scripts/verify-bridge.mjs",
-    "verify:log": "node scripts/verify-log.mjs"
+    "verify:log": "node scripts/verify-log.mjs",
+    "make:icons": ".venv\\Scripts\\python.exe scripts/make-icons.py",
+    "build:worker": "node scripts/build-worker.mjs",
+    "dist:dir": "electron-vite build && node scripts/dist.mjs --win --dir",
+    "dist": "electron-vite build && node scripts/dist.mjs --win",
+    "verify:package": "node scripts/verify-package.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
@@ -36,6 +43,7 @@
     "@vitejs/plugin-vue": "^5.2.1",
     "autoprefixer": "^10.4.20",
     "electron": "^32.2.6",
+    "electron-builder": "^26.18.0",
     "electron-vite": "^2.3.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",

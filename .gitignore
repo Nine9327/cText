@@ -29,3 +29,6 @@ desktop.ini
 *.db
 *.db-wal
 *.db-shm
+
+# PyInstaller 产物（pnpm build:worker 生成）
+resources/python/

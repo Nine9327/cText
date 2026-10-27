@@ -2,7 +2,7 @@
 
 本地优先、可接入网络书源的 Windows 桌面小说阅读器。把散落在多个硬盘 / 移动硬盘里的 TXT、EPUB 收进统一书库，像管理音乐一样管理小说，并支持导入「阅读 3.0」书源搜索网络小说。
 
-> **当前状态**：M0 骨架阶段。窗口外壳、侧栏、数据库层、IPC 框架、Python 桥接、日志/错误处理基础设施（M0-06）已完成；列表数据仍来自 `src/renderer/mock/library.ts`，文件导入与阅读器未实现。
+> **当前状态**：M0 骨架阶段。窗口外壳、侧栏、数据库层、IPC 框架、Python 桥接、日志/错误处理（M0-06）、打包流水线（M0-07）已完成，安装包可装可用；列表数据仍来自 `src/renderer/mock/library.ts`，文件导入与阅读器未实现。
 
 ## 平台
 
@@ -50,9 +50,14 @@ uv pip install -r python/ctext_worker/requirements.txt --python .venv/Scripts/py
 | `pnpm verify:ipc` | M0-04 IPC 验收（白名单、zod 校验、未实现占位、异常映射） |
 | `pnpm verify:bridge` | M0-05 Python 桥验收（帧解码、超时、杀进程自恢复、重启上限） |
 | `pnpm verify:log` | M0-06 日志验收（落盘、脱敏、级别、耗时、错误码映射、全局兜底 + toast） |
+| `pnpm verify:package` | M0-07 打包验收（构建 → 解包目录 → 真跑一次自检）；加 `--installer` 连安装/卸载一起验 |
+| `pnpm build:worker` | 用 PyInstaller 把 Python worker 打成 `resources/python/ctext-worker/` |
 | `pnpm check:env` / `pnpm check:env:electron` | 环境自检 |
 | `pnpm rebuild:native` | 手动按 Electron ABI 重建原生模块 |
 | `pnpm setup:python` | 建立仓库内 Python 3.11 与虚拟环境 |
+| `pnpm dist:dir` | 只出 `release/win-unpacked/`（调试打包问题用，约 40s） |
+| `pnpm dist` | 出完整产物：NSIS 安装包 + portable + zip（约 4 分钟） |
+| `pnpm make:icons` | 重新生成 `resources/icons/icon.ico`（改配色/字形时用） |
 | `pnpm dev:raw` | 绕过包装器直接跑 `electron-vite dev`（排障用） |
 
 ## 目录结构
@@ -77,7 +82,11 @@ src/
    ├─ errors.ts        错误码 + 默认文案 + IpcResult 信封
    └─ ipc/             contract（契约）/ channels（白名单）/ schemas（zod）
 python/ctext_worker/   Python 解析侧车（stdin/stdout NDJSON，只解析本地文件，不联网不碰 DB）
-scripts/               环境自检、验收与本机环境适配脚本
+resources/
+├─ icons/              应用图标（icon.ico 由 scripts/make-icons.py 生成）
+└─ python/             PyInstaller 产物（gitignore，pnpm build:worker 生成）
+release/               electron-builder 产物（gitignore）
+scripts/               环境自检、验收、打包封装与本机环境适配脚本
 docs/                  产品文档 / 开发计划 / MVP 范围
 ```
 
@@ -131,6 +140,33 @@ docs/                  产品文档 / 开发计划 / MVP 范围
 - 未捕获异常（主进程或渲染层）都会落日志 + 弹右下角 toast；渲染层的异常经 `log:renderer` 通道转发到**同一个**日志文件。
 - 主进程不会因为单个 `uncaughtException` 退出；但 10 秒内超过 5 次会判定状态不可信并主动退出。
 
+## 打包与分发（M0-07）
+
+`pnpm dist` 产出在 `release/`：
+
+| 文件 | 说明 | 体积 |
+| --- | --- | --- |
+| `cText-<ver>-setup.exe` | NSIS 安装包，per-user 安装（不需要管理员权限），可选安装目录 | 109 MB |
+| `cText-<ver>-portable.exe` | 单文件免安装（自解压到临时目录运行） | 96 MB |
+| `cText-<ver>-x64.zip` | 解压即用，送测/救急 | 139 MB |
+
+几条固定约定：
+
+- **Python 产物必须在 asar 外面**。asar 里的 `.exe` 无法执行，所以 PyInstaller 的 `--onedir` 产物走 `extraResources` 落到 `resources/python/ctext-worker/`，运行时按 `process.resourcesPath` 拼接（`src/main/bridge/launch.ts`）。
+- **userData 固定在 `%APPDATA%\ctext`**：来自 `package.json` 的 `name`，不是 `electron-builder.yml` 的 `productName`。开发态与安装版共用同一目录，因此没有历史数据迁移；卸载也不会删它（`deleteAppDataOnUninstall: false`）。
+- **不做代码签名**：首次运行会有 SmartScreen 提示（M5-03 再评估证书）。
+- **二进制下载走 npmmirror**：electron / NSIS / winCodeSign 的官方源在本机会 502，`scripts/builder-env.mjs` 统一注入镜像；想走官方源用 `CTEXT_NO_MIRROR=1 pnpm dist`。
+- 改了 Python 代码要先 `pnpm build:worker`（`pnpm verify:package` 会在产物缺失时自动构建）。
+
+打包验收：
+
+```bash
+pnpm verify:package              # 构建 → release/win-unpacked → 真跑一次应用自检
+pnpm verify:package --installer  # 再加：出 NSIS → 静默安装到临时目录 → 从安装目录启动 → 静默卸载
+```
+
+它断言的是**只有真包才成立**的东西：asar 内不含 `.exe`/sourcemap、含 `better-sqlite3` 原生模块、worker 来自 `resources/python`、`health.ping` 通、数据库与日志落在 userData、渲染层真的挂上了 Vue、安全模式决策自洽。
+
 ## 已知环境问题
 
 这几条是本机实测踩出来的，改动前先读，避免重复排障。
@@ -141,7 +177,9 @@ WorkBuddy / VS Code 等 IDE 的终端会预设该变量，Electron 读到后退�
 
 **2. Chromium 子进程沙箱在本机不可用**
 本机存在 MuMu / GameViewer 等虚拟显示适配器时：GPU 进程反复 `0xC0000005` 崩溃并 FATAL 拖死主进程；Network service 起不来导致页面永远空白。
-→ 开发态在 `src/main/index.ts` 关闭 `disable-gpu-sandbox` 与 `no-sandbox`。**生产包的沙箱策略需在 M0-07 重新决策**。极端情况可用 `CTEXT_DISABLE_GPU=1` 强制软件渲染。
+→ 开发态固定关闭 `disable-gpu-sandbox` 与 `no-sandbox`。
+→ **生产包默认带沙箱**（不牺牲别人的安全边界），只在检测到异常时自动回退：上次启动没画完第一帧就没了 / GPU 或 Network 子进程崩溃 / 首帧 20s 超时 → 写标记 + 带 `--safe-mode` 自动重启一次，之后启动直接沿用。实现见 `src/main/platform/safe-mode.ts`，状态在 `userData/boot-state.json`，可从 `system:info` 的 `safeMode` / `safeModeSource` 读到。
+→ 想恢复默认沙箱：删掉 `boot-state.json`，或用 `CTEXT_SAFE_MODE=0` / `--no-safe-mode` 启动一次。极端情况仍可用 `CTEXT_DISABLE_GPU=1` 强制软件渲染。
 
 **3. better-sqlite3 必须锁在 11.x**
 13.x 编译期写死 `NAPI_VERSION=10`（需 Node ≥22.14），而 Electron 32 内置 Node 20.18 只有 N-API 9，加载即静默崩溃。升级到 Electron 35+ 后才可再评估。

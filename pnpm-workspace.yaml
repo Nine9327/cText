@@ -5,6 +5,8 @@ allowBuilds:
   # better-sqlite3 需要 node-gyp 编译，依赖 VS Build Tools 的 C++ 工具链（见 docs/开发计划.md M0-00）
   better-sqlite3: true
   electron: true
+  # 只有 Squirrel.Windows 目标才需要它；本项目用 NSIS + zip，其构建脚本无需执行
+  electron-winstaller: false
   esbuild: true
   vue-demi: true
 

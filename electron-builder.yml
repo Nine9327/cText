@@ -1,0 +1,76 @@
+# electron-builder 配置（M0-07）
+#
+# 目标产物（Windows x64）：
+#   cText-<version>-setup.exe       NSIS，per-user 安装（无需管理员）
+#   cText-<version>-portable.exe    单文件免安装
+#   cText-<version>-win.zip        解压即用（送测/救急用）
+#
+# 几个刻意的选择：
+#   - npmRebuild: false —— 原生模块已在 postinstall 里按 Electron ABI 重建过
+#     （scripts/dev.mjs、pnpm rebuild:native），这里再重建会重新下载 headers，
+#     而 artifacts.electronjs.org 是唯一可用源，离线环境下必失败。
+#   - extraResources 而不是 files —— asar 内的 .exe 无法被执行，Python 产物必须落在
+#     app.asar 外面，运行时通过 process.resourcesPath/python/ctext-worker 定位。
+#   - deleteAppDataOnUninstall: false —— 卸载绝不能删用户的库和书源规则。
+
+appId: cn.ctext.reader
+productName: cText
+copyright: Copyright © 2026 cText
+
+directories:
+  buildResources: resources
+  output: release
+
+# 只打进构建产物与运行时必需文件；源码、脚本、文档都不进包
+files:
+  - out/**
+  - package.json
+  - '!**/*.map'
+  - '!**/*.ts'
+
+asar: true
+npmRebuild: false
+
+extraResources:
+  # PyInstaller --onedir 产物：release/win-unpacked/resources/python/ctext-worker/
+  - from: resources/python
+    to: python
+    filter:
+      - '**/*'
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+    - target: zip
+      arch: [x64]
+  icon: resources/icons/icon.ico
+  requestedExecutionLevel: asInvoker
+  # 产物名统一走这里，避免 中文/空格/大小写 在不同 target 下不一致
+  artifactName: cText-${version}-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: cText
+  deleteAppDataOnUninstall: false
+  language: '2052'
+  installerLanguages:
+    - zh_CN
+    - en_US
+  installerIcon: resources/icons/icon.ico
+  uninstallerIcon: resources/icons/icon.ico
+  installerHeaderIcon: resources/icons/icon.ico
+  artifactName: cText-${version}-setup.${ext}
+
+portable:
+  artifactName: cText-${version}-portable.${ext}
+
+# 不上传到 GitHub Releases；M5-02 的自动更新走自建静态源
+publish: null

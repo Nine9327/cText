@@ -4,6 +4,9 @@ import AppIcon from '@/components/common/AppIcon.vue'
 import { windowApi } from '@/api'
 
 const maximized = ref(false)
+// 「Dev」角标只在开发服务器下显示。之前是硬编码的，打包后仍然挂着，
+// 用户会以为装到了开发版（M0-07 截图时发现）
+const isDev = import.meta.env.DEV
 let off: (() => void) | undefined
 
 onMounted(() => {
@@ -25,7 +28,11 @@ onBeforeUnmount(() => off?.())
         <AppIcon name="book" :size="11" :stroke="2" />
       </div>
       <span class="text-[12.5px] font-medium text-dim">cText</span>
-      <span class="rounded border border-line px-1.5 py-px text-[10px] leading-[14px] text-faint">Dev</span>
+      <span
+        v-if="isDev"
+        class="rounded border border-line px-1.5 py-px text-[10px] leading-[14px] text-faint"
+        >Dev</span
+      >
     </div>
 
     <div class="app-no-drag flex h-full">

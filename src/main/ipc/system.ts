@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import type { WorkerHealthDTO } from '@shared/dto'
 import { getPythonBridge } from '../bridge'
 import { getLogDir } from '../log'
+import { getSwitchReport } from '../platform/safe-mode'
 import { registerHandler } from './registry'
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -30,20 +31,25 @@ export function registerSystemIpc(): void {
     }
   })
 
-  registerHandler('system:info', () => ({
-    name: app.getName(),
-    version: app.getVersion(),
-    electron: process.versions.electron ?? '',
-    chrome: process.versions.chrome ?? '',
-    node: process.versions.node,
-    v8: process.versions.v8,
-    platform: process.platform,
-    arch: process.arch,
-    isDev: !app.isPackaged,
-    userDataPath: app.getPath('userData'),
-    dbPath: join(app.getPath('userData'), 'ctext.db'),
-    logDir: getLogDir() ?? join(app.getPath('userData'), 'logs')
-  }))
+  registerHandler('system:info', () => {
+    const switches = getSwitchReport()
+    return {
+      name: app.getName(),
+      version: app.getVersion(),
+      electron: process.versions.electron ?? '',
+      chrome: process.versions.chrome ?? '',
+      node: process.versions.node,
+      v8: process.versions.v8,
+      platform: process.platform,
+      arch: process.arch,
+      isDev: !app.isPackaged,
+      userDataPath: app.getPath('userData'),
+      dbPath: join(app.getPath('userData'), 'ctext.db'),
+      logDir: getLogDir() ?? join(app.getPath('userData'), 'logs'),
+      safeMode: switches.safeMode,
+      safeModeSource: switches.source
+    }
+  })
 
   /**
    * worker 健康状态。**这个通道永不抛错**——诊断通道自身的价值在于「能报告坏消息」，

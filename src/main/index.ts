@@ -12,6 +12,14 @@ import { installIpc } from './ipc/registry'
 import { runIpcSmoke } from './ipc/smoke'
 import { registerSystemIpc } from './ipc/system'
 import { attachWindowStateEvents, registerWindowIpc } from './ipc/window'
+import { runPackageSmoke } from './package/smoke'
+import {
+  applyStartupSwitches,
+  installBootWatchdog,
+  markCleanExit,
+  markFirstPaint,
+  noteBootFailure
+} from './platform/safe-mode'
 
 const isDev = !app.isPackaged
 
@@ -27,14 +35,26 @@ const log = createLogger('app')
 installGlobalErrorHandlers()
 
 /**
- * 本机（含虚拟显示适配器与安全软件）环境下 Chromium 的子进程沙箱不可用：
+ * M0-07：Chromium 启动开关 + 安全模式回退。
+ *
+ * 本机（虚拟显示适配器 / 安全软件环境）下 Chromium 子进程沙箱不可用：
  * - GPU 进程在 GPU 沙箱下以 0xC0000005 反复崩溃，最终 FATAL 拖死主进程（窗口一闪即退）
  * - Network service 起不来，页面永远加载不出来（表现为空窗口）
- * 开发态同时关闭两者；生产包的沙箱策略留给 M0-07 打包时定。
+ *
+ * 但生产包不能无脑全局关沙箱——那是安全边界。所以改成：
+ * 默认带沙箱启动，上一次非正常退出 / GPU 崩溃 / 首帧超时才自动回退到安全模式
+ * （关 GPU 沙箱 + 关总沙箱），并把结论持久化，之后启动直接走安全模式。
+ * 详细规则见 platform/safe-mode.ts 顶部注释。
+ *
+ * 必须在 app ready 之前调用：Chromium 只在启动时读一次命令行。
  */
-if (isDev) {
-  app.commandLine.appendSwitch('disable-gpu-sandbox')
-  app.commandLine.appendSwitch('no-sandbox')
+const switchReport = applyStartupSwitches(isDev)
+if (switchReport.safeMode) {
+  log.warn('以安全模式启动（Chromium 沙箱已关闭）', {
+    source: switchReport.source,
+    switches: switchReport.switches,
+    crashStreak: switchReport.crashStreak
+  })
 }
 
 /**
@@ -90,6 +110,15 @@ function createWindow() {
   })
 
   mainWindow.once('ready-to-show', () => mainWindow?.show())
+
+  // 首帧到达 = 本次启动成功：撤看门狗、清崩溃计数
+  mainWindow.webContents.on('did-finish-load', () => markFirstPaint())
+
+  // 主框架加载失败通常是渲染链路整体不可用（沙箱/GPU 的典型症状），
+  // 交给启动看门狗决定要不要回退安全模式重启
+  mainWindow.webContents.once('did-fail-load', (_event, code, description, _url, isMainFrame) => {
+    if (isMainFrame) noteBootFailure('渲染层加载失败', { code, description })
+  })
 
   // 外链交给系统浏览器，不在应用内开新窗口，且只放行 http/https
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -199,6 +228,9 @@ if (!gotLock) {
   app.whenReady().then(async () => {
     applyCsp()
 
+    // M0-07：看门狗要在窗口出现之前装好，否则 GPU 一启动就崩的话没人记账
+    installBootWatchdog()
+
     log.info('cText 启动', {
       version: app.getVersion(),
       electron: process.versions.electron ?? '',
@@ -207,6 +239,9 @@ if (!gotLock) {
       platform: process.platform,
       arch: process.arch,
       isDev,
+      packaged: app.isPackaged,
+      secureMode: switchReport.safeMode ? 'safe' : 'default',
+      secureModeSource: switchReport.source,
       userData: app.getPath('userData')
     })
 
@@ -262,6 +297,15 @@ if (!gotLock) {
 
     getPythonBridge().start()
 
+    // M0-07：生产包自检（scripts/verify-package.mjs 触发）。
+    // 与上面的开发态自检相反——这里**只在** isPackaged 为真时才有意义。
+    if (mainWindow && process.env['CTEXT_PACKAGE_SMOKE'] === '1') {
+      const code = await runPackageSmoke(mainWindow)
+      await disposePythonBridge()
+      app.exit(code)
+      return
+    }
+
     if (!app.isPackaged && mainWindow) {
       if (process.env['CTEXT_IPC_SMOKE'] === '1') {
         void runIpcSmoke(mainWindow)
@@ -284,6 +328,8 @@ if (!gotLock) {
   app.on('will-quit', () => {
     closeDatabase()
     void disposePythonBridge()
+    // 启动状态落干净：正常退出不该在下次启动时被当成崩溃
+    markCleanExit()
     // 最后一步：关掉日志句柄。写是同步的，所以这之前的所有行都已在磁盘上
     log.info('cText 退出')
     shutdownLogging()
