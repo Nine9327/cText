@@ -54,6 +54,7 @@ uv pip install -r python/ctext_worker/requirements.txt --python .venv/Scripts/py
 | `pnpm verify:roots` | M1-01 根目录验收（登记查重、掉线与恢复、事件广播、重定位、移除不删书） |
 | `pnpm verify:scan` | M1-02 扫描器验收（白名单、忽略、深度、符号链接防环、截断、取消、1000 文件性能） |
 | `pnpm verify:dedupe` | M1-03 指纹去重验收（指纹一致性、已知盲区、四类重复分流、跨根去重、批量查询） |
+| `pnpm verify:txt` | M1-04 TXT 解析验收（20 个编码样本识别率、章节分级、元数据、bridge 链路） |
 | `pnpm verify:package` | M0-07 打包验收（构建 → 解包目录 → 真跑一次自检）；加 `--installer` 连安装/卸载一起验 |
 | `pnpm build:worker` | 用 PyInstaller 把 Python worker 打成 `resources/python/ctext-worker/` |
 | `pnpm check:env` / `pnpm check:env:electron` | 环境自检 |
@@ -194,6 +195,34 @@ dedupeFiles(rootId, files, { db })  // → { entries, unique, duplicates, stats 
 - **去重只判定不写库**，UPSERT 在 M1-06。这样预览面板能反复跑去重而不产生副作用。
 - **软删除的书不参与去重**（`deleted_at IS NOT NULL` 落在部分索引之外），删了又放回来能重新入库。
 - **批量查 hash 按 400 一批切**：SQLite 的绑定参数有上限（旧版 999）。自检用 450 个文件覆盖跨批边界。
+
+## TXT 解析（M1-04）
+
+三个方法，全部在 Python 侧（`python/ctext_worker/methods/parse_txt.py`），经 bridge 调用：
+
+| 方法 | 返回 |
+| --- | --- |
+| `parse.detect` | `{ format, encoding, size }` |
+| `parse.meta` | `{ title, author, intro, coverPath, lang, encoding }` |
+| `parse.txt.outline` | `{ encoding, detectedEncoding, chapters: [{idx, title, level, offset, length}] }` |
+
+**编码探测链**（`textenc.py`，顺序不可调换）：
+
+1. **BOM** — 有 BOM 就没有歧义。注意 UTF-32 LE 的 BOM 是 UTF-16 LE 的超集，必须排前面。
+2. **严格 UTF-8** — 「能否解码」是确定性判据，比统计模型的 chaos 分数可信。中文 UTF-8 与 GBK 的字节特征互斥。
+3. **UTF-16 启发式** — 纯中文的 UTF-16 没有 NUL 字节，靠「CJK 高字节（0x4E~0x9F）在奇/偶位」判断。
+4. **候选排名** — 取 charset-normalizer 的前 4 个候选 + `gb18030`，按 `(替换字符数, 谚文+假名数, 是否 gb18030, -汉字数)` 排序。**这一步是关键**：短 GBK 文本模型会给 `cp949`，短样本上 `euc-jis-2004` 甚至能赢过 `gb18030`——中日韩共用汉字区，字节层面分不出来，但解出来的字符类别分得出来。
+5. **gb18030 兜底** — GBK/GB2312 的超集。
+
+**章节识别**分强弱两档：强档（`第X卷/部/篇/集` → level 0；`第X章/回/节/话`、`楔子`/`序章`/`尾声`/`番外`、英文 `Chapter`/`Part` → level 1）默认启用；弱档（`1. 标题` 这类纯数字行）**只在强档命中少于 3 条时**才启用——正文里的编号列表太多，无条件启用会把目录炸成几百条垃圾。标题行长超过 50 字不算标题。
+
+几条必须记住的约定：
+
+- **`offset` 是字节偏移**（`chapters.anchor` 的约定），不是字符偏移。**带 BOM 的文件必须跳过 BOM**，否则第一章偏 3 字节，切出来的正文开头带不可见字符。
+- **`level` 语义：0 = 卷/部（上层），1 = 章/回，2 = 更细层级**。数字越小越靠近目录树根。早期 `ChapterDTO` 注释写成「0 为章、1 为卷」是笔误，M1-04 已改正。
+- **一章都没识别出来时返回单章「全文」**。不是所有 TXT 都有章节标记，没有兜底阅读器会拿到空目录。
+- **元数据优先级：书名看文件名，作者看正文**（「作者：」在正文里比文件名可靠）。
+- 验收 `pnpm verify:txt` 分两段：`python/smoke_parse.py` 测算法（能在 Python 侧造 GBK/UTF-16 样本），`parse-bridge-smoke.ts` 测链路。
 
 ## 界面骨架（M0-08）
 

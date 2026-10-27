@@ -31,7 +31,8 @@
     "verify:package": "node scripts/verify-package.mjs",
     "verify:roots": "node scripts/verify-roots.mjs",
     "verify:scan": "node scripts/verify-scan.mjs",
-    "verify:dedupe": "node scripts/verify-dedupe.mjs"
+    "verify:dedupe": "node scripts/verify-dedupe.mjs",
+    "verify:txt": "node scripts/verify-txt.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

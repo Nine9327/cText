@@ -179,7 +179,11 @@ export interface ImportProgressDTO {
 export interface ChapterDTO {
   idx: number
   title: string
-  /** 0 为章，1 为卷，用于目录树层级 */
+  /**
+   * 目录树层级：**0 = 卷/部（上层），1 = 章/回，2 = 更细的层级**。
+   * 数字越小越靠近根——与 `chapters.level` 的 DDL 默认值 0 一致。
+   * （M1-04 澄清：早期注释写成「0 为章、1 为卷」是笔误，会让目录树层级上下颠倒）
+   */
   level: number
 }
 

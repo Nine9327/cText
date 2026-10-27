@@ -5,8 +5,8 @@
 # health.ping 的 deps 字段会报告这些依赖是否就位。
 #
 # 注意：PyInstaller 打包（M0-07）前必须装齐，否则 --onedir 产物缺模块。
+# pdfminer.six 已移除：决策 D1 不做 PDF 解析，留着只会让 onedir 产物变大。
 ebooklib==0.18
 lxml==5.3.0
-pdfminer.six==20231228
 charset-normalizer==3.4.0
 Pillow==11.0.0

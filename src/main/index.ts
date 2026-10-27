@@ -17,6 +17,7 @@ import { installRootsMonitor, stopRootsMonitor } from './library/roots-monitor'
 import { runRootsSmoke } from './library/roots-smoke'
 import { runScannerSmoke } from './library/scanner-smoke'
 import { runDedupeSmoke } from './library/dedupe-smoke'
+import { runParseBridgeSmoke } from './library/parse-bridge-smoke'
 import { runPackageSmoke } from './package/smoke'
 import { runUiSmoke } from './ui/smoke'
 import {
@@ -345,6 +346,19 @@ if (!gotLock) {
 
     // M1-01：根目录状态监测。启动检测不阻塞窗口，焦点检测按 30s 节流
     installRootsMonitor()
+
+    // M1-04 自检：TXT 解析经 Python bridge 的完整链路（算法准确性在 python/smoke_parse.py）
+    if (!app.isPackaged && process.env['CTEXT_PARSE_SMOKE'] === '1') {
+      const checks = await runParseBridgeSmoke()
+      for (const c of checks) {
+        console.log(`SMOKE PARSE ${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.detail ? ` (${c.detail})` : ''}`)
+      }
+      const failed = checks.filter((c) => !c.ok).length
+      console.log(`SMOKE PARSE SUMMARY ${checks.length - failed}/${checks.length}`)
+      await disposePythonBridge()
+      app.exit(failed === 0 ? 0 : 1)
+      return
+    }
 
     // M0-07：生产包自检（scripts/verify-package.mjs 触发）。
     // 与上面的开发态自检相反——这里**只在** isPackaged 为真时才有意义。
