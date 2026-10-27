@@ -20,6 +20,8 @@ export interface ImportUiSmokeContext {
   booksDir: string
   /** 大目录：60 本，用于取消场景 */
   cancelDir: string
+  /** 401 本，用于验证预览列表裁剪提示 */
+  clipDir: string
 }
 
 interface SmokeItem {
@@ -278,10 +280,31 @@ export async function runImportUiSmoke(win: BrowserWindow, ctx: ImportUiSmokeCon
     check('取消后进入结果阶段', cancelled?.stage === 'result', cancelled?.stage ?? '未进入')
     check('结果面板说明已取消', /已取消导入/.test(cancelled?.text ?? ''), (cancelled?.text ?? '').slice(0, 40))
 
-    // ---------------------------------------------------------------- 7. 收尾
+    // ---------------------------------------------------------------- 收尾：结果页的「完成」
     await run(win, `await click('[data-import-finish]')`)
     const closed = await run(win, `await sleep(200); return !!q('[data-import-dialog]')`)
     check('点完成后面板关闭', closed === false, String(closed))
+
+    // ---------------------------------------------------------------- 8. 大目录截断提示
+    // 渲染层只画 300 行；300~2000 之间主进程不会置 truncated 标志，
+    // 提示必须按「实际渲染行数」判断，否则 500 本的目录会静默少一半
+    await drag('dragEnter', dirData([ctx.clipDir]))
+    await drag('drop', dirData([ctx.clipDir]))
+    await run(win, `await click('[data-import-scan]')`)
+    const clip = (await run(win, `
+      await waitFor(() => q('[data-import-dialog]').getAttribute('data-stage') === 'preview', 60000)
+      return { stage: q('[data-import-dialog]').getAttribute('data-stage'), clipped: !!q('[data-import-clip]'), rows: qa('[data-import-row]').length }
+    `)) as { stage: string; clipped: boolean; rows: number } | null
+
+    check('大目录进入预览阶段', clip?.stage === 'preview', clip?.stage ?? '未进入')
+    check('超过 300 行时显示截断提示', clip?.clipped === true, String(clip?.clipped))
+    check('列表只渲染 300 行', clip?.rows === 300, String(clip?.rows))
+
+    await run(win, `
+      q('[data-import-close]').click()
+      await sleep(200)
+      return null
+    `)
   } catch (err) {
     check('自检脚本执行', false, err instanceof Error ? err.message : String(err))
   } finally {

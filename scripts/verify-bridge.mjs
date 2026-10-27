@@ -10,7 +10,8 @@
  * 用法：pnpm verify:bridge（会先构建 out/，再以 CTEXT_BRIDGE_SMOKE=1 启动应用）
  */
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
@@ -57,10 +58,12 @@ function build() {
   }
 }
 
-function runSmoke() {
+function runSmoke(scratch) {
   console.log('[2/2] 桥接冒烟检查 ...')
   return new Promise((resolve) => {
-    const child = spawn(electronBin, ['.'], {
+    // 必须用临时 userData：不带的话会碰真实 %APPDATA%\ctext（写日志、杀 worker），
+    // 而且用户自己开着 cText 时单实例锁会让这里直接假失败
+    const child = spawn(electronBin, ['.', `--user-data-dir=${join(scratch, 'userData')}`], {
       cwd: root,
       env: { ...cleanEnv, CTEXT_BRIDGE_SMOKE: '1' },
       stdio: ['ignore', 'pipe', 'pipe']
@@ -104,8 +107,15 @@ function runSmoke() {
 }
 
 preflight()
+const scratch = mkdtempSync(join(tmpdir(), 'ctext-bridge-'))
 build()
-await runSmoke()
+await runSmoke(scratch)
+
+try {
+  rmSync(scratch, { recursive: true, force: true })
+} catch {
+  console.log(`  · 临时目录未清理（可手动删）：${scratch}`)
+}
 
 const failed = results.filter((r) => !r.ok)
 console.log(

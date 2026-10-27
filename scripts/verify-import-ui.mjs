@@ -27,6 +27,7 @@ delete cleanEnv.NODE_OPTIONS
 delete cleanEnv.CTEXT_SAFE_MODE
 delete cleanEnv.CTEXT_IMPORT_UI_DIR
 delete cleanEnv.CTEXT_IMPORT_UI_CANCEL_DIR
+delete cleanEnv.CTEXT_IMPORT_UI_CLIP_DIR
 
 const results = []
 const record = (name, ok, detail = '') => {
@@ -71,6 +72,16 @@ function makeCancelDir() {
   return dir
 }
 
+/** 401 本：跨过渲染层 300 行的裁剪阈值，验证「只显示前 300 项」的提示会出现 */
+function makeClipDir() {
+  const dir = join(scratch, 'clip')
+  mkdirSync(dir, { recursive: true })
+  for (let i = 0; i < 401; i += 1) {
+    writeFileSync(join(dir, `book-${String(i).padStart(4, '0')}.txt`), bookText(2, `L${i}`), 'utf8')
+  }
+  return dir
+}
+
 function build() {
   console.log('[1/3] 构建 out/ ...')
   const r = spawnSync(
@@ -85,7 +96,7 @@ function build() {
   }
 }
 
-function runUiSmoke(booksDir, cancelDir) {
+function runUiSmoke(booksDir, cancelDir, clipDir) {
   console.log('[3/3] 导入交互自检 ...')
   return new Promise((resolve) => {
     const child = spawn(electronBin, ['.', `--user-data-dir=${join(scratch, 'userData')}`], {
@@ -94,7 +105,8 @@ function runUiSmoke(booksDir, cancelDir) {
         ...cleanEnv,
         CTEXT_IMPORT_UI_SMOKE: '1',
         CTEXT_IMPORT_UI_DIR: booksDir,
-        CTEXT_IMPORT_UI_CANCEL_DIR: cancelDir
+        CTEXT_IMPORT_UI_CANCEL_DIR: cancelDir,
+        CTEXT_IMPORT_UI_CLIP_DIR: clipDir
       },
       stdio: ['ignore', 'pipe', 'pipe']
     })
@@ -139,10 +151,12 @@ build()
 console.log('[2/3] 生成样本目录 ...')
 const booksDir = makeBooksDir()
 const cancelDir = makeCancelDir()
+const clipDir = makeClipDir()
 record('小样本目录已生成', existsSync(booksDir), booksDir)
 record('取消用样本目录已生成', existsSync(cancelDir), cancelDir)
+record('截断用样本目录已生成', existsSync(clipDir), clipDir)
 
-await runUiSmoke(booksDir, cancelDir)
+await runUiSmoke(booksDir, cancelDir, clipDir)
 
 try {
   rmSync(scratch, { recursive: true, force: true })

@@ -18,7 +18,9 @@ import type { RootDTO } from '@shared/dto'
 import type { RootWithCount } from '../db/repositories/roots'
 import { rootsRepo } from '../db/repositories/roots'
 import { checkAllRoots, matchRelocated, probePath } from '../library/roots-monitor'
+import { startImport } from '../library/import-task'
 import { createLogger } from '../log'
+import { coversDir } from './import'
 import { registerHandler } from './registry'
 
 const log = createLogger('roots')
@@ -82,10 +84,12 @@ export function registerRootsIpc(): void {
     const created = repo.create({ label: defaultLabel(full), path: full })
     log.info('登记根目录', { rootId: created.id, path: created.path, scanNow })
 
-    // TODO(M1-02): scanNow 为真时在这里投递扫描任务。M1-01 只有登记与检测，
-    // 扫描器尚未实现，先如实记录意图，避免界面给了勾选框却什么都不发生却无人知晓。
+    // 「同时立即扫描导入」：登记完直接把导入任务投进队列（M1-06 的调度会串行化）。
+    // 进度走 import:progress 事件，登记接口本身不等扫描结果——
+    // 一个几千本的目录要跑几分钟，阻塞在这里 UI 会以为卡死。
     if (scanNow) {
-      log.warn('scanNow 已请求，但扫描器未实现（M1-02 接入）', { rootId: created.id })
+      const { taskId } = startImport(created.path, {}, { coversDir: coversDir() })
+      log.info('登记后立即开始导入', { rootId: created.id, taskId })
     }
 
     return toDTO(created)

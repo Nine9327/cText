@@ -67,6 +67,7 @@ const percent = computed(() => {
 
 const phaseText = computed(() => {
   const phase = progress.value?.phase
+  if (phase === 'queued') return '排队中，等待上一个导入任务完成…'
   if (phase === 'scan') return '正在扫描目录…'
   if (phase === 'parse') return '正在解析书籍…'
   if (phase === 'commit') return '正在写入书库…'
@@ -207,8 +208,8 @@ async function copyPath(relPath: string): Promise<void> {
               >扫描 {{ store.preview?.elapsedMs ?? 0 }}ms，共 {{ store.preview?.total ?? 0 }} 项</span
             >
           </div>
-          <p v-if="store.preview?.truncated" class="mt-1.5 text-[11.5px] text-amber-300/80">
-            目录过大，列表只显示前 {{ store.maxRows }} 项；导入仍会处理全部文件。
+          <p v-if="store.rowsClipped" class="mt-1.5 text-[11.5px] text-amber-300/80" data-import-clip>
+            目录较大，列表只显示前 {{ store.maxRows }} 项（共 {{ store.preview?.total ?? 0 }} 项）；导入仍会处理全部文件。
           </p>
         </div>
 

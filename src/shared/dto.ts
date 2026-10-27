@@ -164,7 +164,7 @@ export interface ImportOptions {
   onDuplicate?: 'skip' | 'overwrite'
 }
 
-export type ImportPhase = 'scan' | 'parse' | 'commit' | 'done' | 'cancelled' | 'failed'
+export type ImportPhase = 'queued' | 'scan' | 'parse' | 'commit' | 'done' | 'cancelled' | 'failed'
 
 /** 单本导入失败。`relPath` 可直接复制给用户，`reason` 不含绝对路径（脱敏） */
 export interface ImportFailureDTO {

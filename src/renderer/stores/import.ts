@@ -72,6 +72,18 @@ export const useImportStore = defineStore('import', () => {
     return filtered.slice(0, MAX_ROWS)
   })
 
+  /**
+   * 列表是否真的被裁掉了一截。
+   *
+   * 不能只看主进程的 `preview.truncated`（那按 2000 条算）：这里实际只渲染 300 行，
+   * 300~2000 之间的目录如果不提示，用户会误以为只有 300 本。
+   */
+  const rowsClipped = computed(() => {
+    const items = preview.value?.items ?? []
+    const filtered = tab.value === 'all' ? items : items.filter((item) => matchTab(item))
+    return filtered.length > MAX_ROWS
+  })
+
   function matchTab(item: ScanPreviewItemDTO): boolean {
     if (tab.value === 'new') return item.status === 'new'
     if (tab.value === 'duplicate') return item.status === 'duplicate'
@@ -213,6 +225,7 @@ export const useImportStore = defineStore('import', () => {
     tab,
     counts,
     rows,
+    rowsClipped,
     canStart,
     maxRows: MAX_ROWS,
     reset,

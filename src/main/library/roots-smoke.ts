@@ -15,6 +15,7 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, type BrowserWindow } from 'electron'
+import { getPythonBridge } from '../bridge'
 import { getDb } from '../db/connection'
 import { ulid } from '../utils/id'
 
@@ -31,8 +32,10 @@ const SETUP = String.raw`
 (() => {
   if (!window.__rootsOut) window.__rootsOut = []
   if (!window.__rootsEvents) window.__rootsEvents = []
+  if (!window.__importEvents) window.__importEvents = []
   if (!window.__rootsReady) {
     window.api.on('roots:changed', (p) => window.__rootsEvents.push(p))
+    window.api.on('import:progress', (p) => window.__importEvents.push(p))
     window.__rootsReady = true
   }
   window.__push = (name, ok, detail) =>
@@ -205,6 +208,34 @@ const caseRemoveWithBooks = String.raw`
 })()
 `
 
+/** 第七段：scanNow 立即扫描导入（M1-02 遗留的挂接点） */
+const caseScanNow = (dirScan: string) =>
+  String.raw`
+(async () => {
+  const push = window.__push
+  const before = window.__importEvents.length
+  const added = await window.api.invoke('roots:add', { path: ${JSON.stringify(dirScan)}, scanNow: true })
+  push('scanNow 登记根目录成功', added.ok, added.ok ? 'id ' + added.data.id.slice(0, 8) : added.error.code)
+  if (!added.ok) return 'abort'
+
+  // 等导入任务跑完。2 本小书 + worker 冷启动，30s 预算足够
+  const terminal = await new Promise((resolve) => {
+    const deadline = Date.now() + 30000
+    const tick = () => {
+      const evs = window.__importEvents.slice(before)
+      const last = evs.find((e) => ['done', 'cancelled', 'failed'].includes(e.phase))
+      if (last) resolve(last)
+      else if (Date.now() > deadline) resolve(null)
+      else setTimeout(tick, 60)
+    }
+    tick()
+  })
+  push('scanNow 触发了导入任务', !!terminal, terminal ? terminal.phase : '30s 内没有终态事件')
+  push('scanNow 导入数量正确', !!terminal && terminal.imported === 2, terminal ? 'imported=' + terminal.imported : '-')
+  return 'ok'
+})()
+`
+
 async function runScript(win: BrowserWindow, code: string): Promise<string> {
   const result = (await win.webContents.executeJavaScript(code)) as string | undefined
   return result ?? 'ok'
@@ -214,6 +245,21 @@ async function runScript(win: BrowserWindow, code: string): Promise<string> {
  * 往临时库里塞一本书，挂到指定根目录上。
  * 只写最小必填列——目的是验证外键解绑，不是验证导入流程（那是 M1-06 的事）。
  */
+/**
+ * scanNow 用例的书。`seed` 必须每本不同：内容相同的两本会被指纹判成批内重复，
+ * 「导入 2 本」就会变成 1 本。
+ */
+function scanBookText(seed: string): string {
+  return [
+    `作者：张三`,
+    `简介：scanNow 样本 ${seed}。`,
+    `第1章 开始`,
+    `这是第一章的正文（${seed}），写得长一点，让编码探测有足够的样本可以收敛。`,
+    `第2章 继续`,
+    `这是第二章的正文（${seed}）。`
+  ].join('\n')
+}
+
 function seedBook(rootId: string): string {
   const db = getDb()
   const id = ulid()
@@ -234,6 +280,7 @@ export async function runRootsSmoke(win: BrowserWindow): Promise<number> {
   const dirAUpper = join(base, 'SMOKE-ROOT-A')
   const dirB = join(base, 'smoke-root-b')
   const dirC = join(base, 'smoke-root-c')
+  const dirScan = join(base, 'smoke-root-scan')
   const filePath = join(base, 'not-a-dir.txt')
   const missing = join(base, 'does-not-exist')
 
@@ -283,9 +330,24 @@ export async function runRootsSmoke(win: BrowserWindow): Promise<number> {
       }
     }
 
+    // ---------------------------------------------------------------- scanNow：登记后立即导入
+    // 这是 M1-02 遗留的挂接点：勾选「立即扫描导入」必须真的投递导入任务。
+    // 依赖 Python worker 解析，到这里才把它拉起来（前面的用例都不需要）
+    mkdirSync(dirScan, { recursive: true })
+    writeFileSync(join(dirScan, '书一.txt'), scanBookText('S1'), 'utf8')
+    writeFileSync(join(dirScan, '书二.txt'), scanBookText('S2'), 'utf8')
+    getPythonBridge().start()
+    const readyDeadline = Date.now() + 15_000
+    while (getPythonBridge().getStatus().state !== 'ready' && Date.now() < readyDeadline) await sleep(40)
+    check(
+      'worker 就绪（scanNow 用例）',
+      getPythonBridge().getStatus().state === 'ready',
+      getPythonBridge().getStatus().state
+    )
+    await runScript(win, caseScanNow(dirScan))
+
     // 把渲染层累积的断言搬回主进程
-    const collected = (await win.webContents.executeJavaScript(
-      'JSON.stringify(window.__rootsOut || [])'
+    const collected = (await win.webContents.executeJavaScript(      'JSON.stringify(window.__rootsOut || [])'
     )) as string
     for (const item of JSON.parse(collected) as SmokeItem[]) {
       results.push(item)

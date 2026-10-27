@@ -100,6 +100,34 @@ export interface ImportRuntimeOptions {
 
 const tasks = new Map<string, TaskState>()
 
+/**
+ * 任务级串行（产品文档 §2.4「重复触发 → 任务队列串行化」）。
+ *
+ * 只允许一个任务真正在跑，后来的排队而不是并发——两个任务同时解析会争抢
+ * Python worker 的 4 线程池，两边都变慢；同时写库也会让进度事件的
+ * imported/processed 混在一起，UI 没法画单条进度条。
+ */
+let activeTask: TaskState | null = null
+
+interface PendingTask {
+  task: TaskState
+  target: ImportTarget
+  options: ImportOptions
+  runtime: ImportRuntimeOptions
+  db: Db
+}
+const pendingTasks: PendingTask[] = []
+
+function pumpNext(): void {
+  const next = pendingTasks.shift()
+  if (!next) {
+    activeTask = null
+    return
+  }
+  activeTask = next.task
+  void runTask(next.task, next.target, next.options, next.runtime, next.db)
+}
+
 type ProgressListener = (dto: ImportProgressDTO) => void
 const progressListeners = new Set<ProgressListener>()
 
@@ -403,6 +431,18 @@ export function startImport(
   tasks.set(task.id, task)
   pruneFinished()
 
+  // 已有任务在跑：排队而不是并发。resolveImportTarget 已经执行过，
+  // 根目录登记等副作用此时已生效，排队不影响数据
+  if (activeTask && activeTask.finishedAt === null) {
+    task.phase = 'queued'
+    pendingTasks.push({ task, target, options, runtime, db })
+    log.info('导入任务排队', { taskId: task.id, ahead: pendingTasks.length, active: activeTask.id })
+    emitProgress(task, 0, true)
+    return { taskId: task.id }
+  }
+
+  activeTask = task
+
   // 不 await：IPC 立刻返回 taskId，进度全部走 import:progress 事件。
   // 任何异常都在 runTask 内部收敛成 failed 阶段，不会变成未处理的 rejection
   void runTask(task, target, options, runtime, db)
@@ -418,6 +458,18 @@ export function cancelImport(taskId: string): void {
     return
   }
   if (task.finishedAt !== null) return
+
+  // 还在排队的任务：直接摘掉并标记取消，根本不用等它跑
+  if (task.phase === 'queued') {
+    const index = pendingTasks.findIndex((pending) => pending.task.id === taskId)
+    if (index >= 0) pendingTasks.splice(index, 1)
+    task.phase = 'cancelled'
+    task.finishedAt = Date.now()
+    emitProgress(task, 0, true)
+    log.info('取消排队中的导入', { taskId })
+    return
+  }
+
   log.info('取消导入', { taskId, processed: task.processed, total: task.total })
   task.controller.abort()
 }
@@ -576,6 +628,8 @@ async function runTask(
       failed: task.failedTotal,
       elapsedMs: Number((performance.now() - startedAt).toFixed(0))
     })
+    // 无论成败都让位给下一个排队任务；没有排队的就把槽位清掉
+    pumpNext()
   }
 }
 

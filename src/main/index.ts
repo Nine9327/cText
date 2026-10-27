@@ -343,13 +343,14 @@ if (!gotLock) {
     if (!app.isPackaged && mainWindow && process.env['CTEXT_IMPORT_UI_SMOKE'] === '1') {
       const booksDir = process.env['CTEXT_IMPORT_UI_DIR']
       const cancelDir = process.env['CTEXT_IMPORT_UI_CANCEL_DIR']
-      if (!booksDir || !cancelDir) {
-        console.log('SMOKE IMPORTUI FAIL 缺少 CTEXT_IMPORT_UI_DIR / CTEXT_IMPORT_UI_CANCEL_DIR')
+      const clipDir = process.env['CTEXT_IMPORT_UI_CLIP_DIR']
+      if (!booksDir || !cancelDir || !clipDir) {
+        console.log('SMOKE IMPORTUI FAIL 缺少 CTEXT_IMPORT_UI_DIR / CTEXT_IMPORT_UI_CANCEL_DIR / CTEXT_IMPORT_UI_CLIP_DIR')
         await disposePythonBridge()
         app.exit(1)
         return
       }
-      await runImportUiSmoke(mainWindow, { booksDir, cancelDir })
+      await runImportUiSmoke(mainWindow, { booksDir, cancelDir, clipDir })
       return
     }
 
