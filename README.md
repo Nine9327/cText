@@ -43,6 +43,7 @@ pnpm setup:python   # 建立 .python/ 解释器与 .venv/，均留在仓库内�
 | `pnpm start` | 以构建产物启动（不是开发模式，改代码不会热更） |
 | `pnpm typecheck` | 主进程 + 渲染层类型检查 |
 | `pnpm verify:shell` | M0-02 窗口外壳验收（构建 + 冒烟断言 + 单实例锁） |
+| `pnpm verify:db` | M0-03 数据库验收（建库、迁移幂等、约束、FTS 触发器） |
 | `pnpm check:env` / `pnpm check:env:electron` | 环境自检 |
 | `pnpm rebuild:native` | 手动按 Electron ABI 重建原生模块 |
 | `pnpm setup:python` | 建立仓库内 Python 3.11 与虚拟环境 |

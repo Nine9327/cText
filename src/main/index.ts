@@ -1,5 +1,7 @@
-import { app, BrowserWindow, ipcMain, screen, session, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, screen, session, shell } from 'electron'
 import { join } from 'node:path'
+import { closeDatabase, initDatabase } from './db/connection'
+import { runDbSmoke } from './db/smoke'
 
 const isDev = !app.isPackaged
 
@@ -191,6 +193,33 @@ if (!gotLock) {
   app.whenReady().then(() => {
     applyCsp()
     registerWindowIpc()
+
+    // M0-03：数据库在窗口创建之前初始化，失败则不进入界面
+    const dbFile = join(app.getPath('userData'), 'ctext.db')
+    try {
+      const { migration } = initDatabase(dbFile)
+      if (migration.applied.length > 0) {
+        console.log(`[db] ${dbFile} 已迁移 ${migration.from} → ${migration.to}`)
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      dialog.showErrorBox('数据库初始化失败', `${dbFile}\n\n${message}`)
+      app.quit()
+      return
+    }
+
+    if (!app.isPackaged && process.env['CTEXT_DB_SMOKE'] === '1') {
+      console.log(`SMOKE DB INFO dbfile=${dbFile}`)
+      const checks = runDbSmoke()
+      for (const c of checks) {
+        console.log(`SMOKE DB ${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.detail ? ` (${c.detail})` : ''}`)
+      }
+      const failed = checks.filter((c) => !c.ok).length
+      console.log(`SMOKE DB SUMMARY ${checks.length - failed}/${checks.length}`)
+      app.exit(failed === 0 ? 0 : 1)
+      return
+    }
+
     createWindow()
 
     if (!app.isPackaged && process.env['CTEXT_SMOKE'] === '1' && mainWindow) {
@@ -205,4 +234,7 @@ if (!gotLock) {
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit()
   })
+
+  // 正常退出时关闭连接，让 WAL 落盘并清掉 -wal / -shm
+  app.on('will-quit', () => closeDatabase())
 }
