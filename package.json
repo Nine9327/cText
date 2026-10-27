@@ -10,9 +10,10 @@
     "dev:web": "vite --config vite.web.config.ts",
     "build": "electron-vite build",
     "start": "node scripts/dev.mjs preview",
-    "typecheck": "vue-tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && vue-tsc --noEmit -p tsconfig.web.json",
     "check:env": "node scripts/verify-env.mjs",
     "check:env:electron": "node scripts/run-electron-check.mjs",
+    "verify:shell": "node scripts/verify-shell.mjs",
     "rebuild:native": "electron-rebuild -f -o better-sqlite3 --build-from-source -d https://artifacts.electronjs.org/headers/dist",
     "setup:python": "node scripts/setup-python.mjs",
     "postinstall": "pnpm rebuild:native"
