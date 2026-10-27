@@ -378,6 +378,33 @@ export interface EchoResponse {
   from: 'main'
 }
 
+/** Python worker 的生命周期状态，与 main/bridge/PythonBridge.ts 的 BridgeState 一致 */
+export type WorkerState = 'idle' | 'starting' | 'ready' | 'restarting' | 'failed' | 'stopped'
+
+/**
+ * worker 健康状态（诊断用）。
+ *
+ * `worker` 是 worker 自报的握手信息，未就绪时为 null——
+ * UI 上「诊断」页据此显示「解析引擎：就绪 v0.1.0 / pid 1234」。
+ */
+export interface WorkerHealthDTO {
+  state: WorkerState
+  pid: number | null
+  /** 累计自动重启次数 */
+  restarts: number
+  lastError: string | null
+  worker: {
+    version: string
+    protocol: number
+    pid: number
+    python: string
+    uptimeMs: number
+    methods: string[]
+    /** M1 的解析依赖是否就位（find_spec 结果，不触发真实导入） */
+    deps: Record<string, boolean>
+  } | null
+}
+
 // ---------------------------------------------------------------- 事件载荷
 
 export interface WindowStateDTO {

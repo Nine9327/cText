@@ -18,7 +18,8 @@
     "rebuild:native": "electron-rebuild -f -o better-sqlite3 --build-from-source -d https://artifacts.electronjs.org/headers/dist",
     "setup:python": "node scripts/setup-python.mjs",
     "postinstall": "pnpm rebuild:native",
-    "verify:ipc": "node scripts/verify-ipc.mjs"
+    "verify:ipc": "node scripts/verify-ipc.mjs",
+    "verify:bridge": "node scripts/verify-bridge.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

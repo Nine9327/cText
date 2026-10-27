@@ -31,13 +31,16 @@ import type {
   SourceImportResultDTO,
   SourceSearchResultDTO,
   ToastDTO,
-  WindowStateDTO
+  WindowStateDTO,
+  WorkerHealthDTO
 } from '../dto'
 
 export type IpcMap = {
   // 系统（诊断用，产品界面不直接调用；M0-04 的验收依赖它）
   'system:echo': { input: EchoRequest; output: EchoResponse }
   'system:info': { input: void; output: AppInfoDTO }
+  // Python worker 健康状态：返回握手信息 + 进程状态，未就绪时 worker 为 null
+  'system:worker-health': { input: void; output: WorkerHealthDTO }
 
   // 窗口（文档 §3.6 只定义了 window:state 事件，这里补一个读取型通道：
   // 渲染层挂载时先用它取初始状态，避免「先订阅后加载」与「先加载后订阅」的竞态）

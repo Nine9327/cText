@@ -19,6 +19,7 @@ function defineChannels<All extends PropertyKey>() {
 export const INVOKE_CHANNELS = defineChannels<IpcChannel>()([
   'system:echo',
   'system:info',
+  'system:worker-health',
   'window:get-state',
 
   'library:list',

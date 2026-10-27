@@ -7,6 +7,8 @@
  */
 import { app } from 'electron'
 import { join } from 'node:path'
+import type { WorkerHealthDTO } from '@shared/dto'
+import { getPythonBridge } from '../bridge'
 import { registerHandler } from './registry'
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
@@ -40,4 +42,43 @@ export function registerSystemIpc(): void {
     userDataPath: app.getPath('userData'),
     dbPath: join(app.getPath('userData'), 'ctext.db')
   }))
+
+  /**
+   * worker 健康状态。**这个通道永不抛错**——诊断通道自身的价值在于「能报告坏消息」，
+   * 如果 worker 挂了它还返回错误，界面上就只剩一个空白而不是「未就绪 + 原因」。
+   */
+  registerHandler('system:worker-health', async (): Promise<WorkerHealthDTO> => {
+    const bridge = getPythonBridge()
+    const status = bridge.getStatus()
+    const base: WorkerHealthDTO = {
+      state: status.state,
+      pid: status.pid,
+      restarts: status.restarts,
+      lastError: status.lastError,
+      worker: null
+    }
+
+    if (status.state !== 'ready') return base
+
+    try {
+      const health = await bridge.ping(5_000)
+      return {
+        ...base,
+        worker: {
+          version: health.version,
+          protocol: health.protocol,
+          pid: health.pid,
+          python: health.python,
+          uptimeMs: health.uptimeMs,
+          methods: health.methods,
+          deps: health.deps
+        }
+      }
+    } catch (err) {
+      return {
+        ...base,
+        lastError: err instanceof Error ? err.message : String(err)
+      }
+    }
+  })
 }

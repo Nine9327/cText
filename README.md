@@ -2,7 +2,7 @@
 
 本地优先、可接入网络书源的 Windows 桌面小说阅读器。把散落在多个硬盘 / 移动硬盘里的 TXT、EPUB 收进统一书库，像管理音乐一样管理小说，并支持导入「阅读 3.0」书源搜索网络小说。
 
-> **当前状态**：M0 骨架阶段。窗口外壳、侧栏、数据库层、IPC 框架已完成；列表数据仍来自 `src/renderer/mock/library.ts`，文件导入与阅读器未实现。
+> **当前状态**：M0 骨架阶段。窗口外壳、侧栏、数据库层、IPC 框架、Python 桥接已完成；列表数据仍来自 `src/renderer/mock/library.ts`，文件导入与阅读器未实现。
 
 ## 平台
 
@@ -31,7 +31,10 @@ Python 环境（做 M0-05 之前执行即可）：
 
 ```bash
 pnpm setup:python   # 建立 .python/ 解释器与 .venv/，均留在仓库内且有 gitignore
+uv pip install -r python/ctext_worker/requirements.txt --python .venv/Scripts/python.exe
 ```
+
+第二条命令装解析依赖（ebooklib / lxml / pdfminer.six / charset-normalizer / Pillow）。M0-05 的 worker 骨架只用标准库，但 `health.ping` 会报告这些依赖是否就位，缺了会在 `pnpm verify:bridge` 里显红。
 
 ## 常用命令
 
@@ -45,6 +48,7 @@ pnpm setup:python   # 建立 .python/ 解释器与 .venv/，均留在仓库内�
 | `pnpm verify:shell` | M0-02 窗口外壳验收（构建 + 冒烟断言 + 单实例锁） |
 | `pnpm verify:db` | M0-03 数据库验收（建库、迁移幂等、约束、FTS 触发器） |
 | `pnpm verify:ipc` | M0-04 IPC 验收（白名单、zod 校验、未实现占位、异常映射） |
+| `pnpm verify:bridge` | M0-05 Python 桥验收（帧解码、超时、杀进程自恢复、重启上限） |
 | `pnpm check:env` / `pnpm check:env:electron` | 环境自检 |
 | `pnpm rebuild:native` | 手动按 Electron ABI 重建原生模块 |
 | `pnpm setup:python` | 建立仓库内 Python 3.11 与虚拟环境 |
@@ -58,6 +62,7 @@ src/
 │  ├─ index.ts         app 生命周期、单实例锁、窗口创建
 │  ├─ ipc/             通道注册（registry / system / window）+ 冒烟
 │  ├─ db/              连接、PRAGMA、版本化迁移、DDL
+│  ├─ bridge/          Python worker：进程管理、NDJSON 协议、定位启动命令
 │  └─ utils/           作用域日志（M0-06 换成结构化日志）
 ├─ preload/            contextBridge 白名单，渲染层唯一入口
 ├─ renderer/           Vue 3 渲染层
@@ -66,6 +71,7 @@ src/
    ├─ dto.ts           跨进程 DTO（字段含义的单一真相）
    ├─ errors.ts        错误码 + IpcResult 信封
    └─ ipc/             contract（契约）/ channels（白名单）/ schemas（zod）
+python/ctext_worker/   Python 解析侧车（stdin/stdout NDJSON，只解析本地文件，不联网不碰 DB）
 scripts/               环境自检、验收与本机环境适配脚本
 docs/                  产品文档 / 开发计划 / MVP 范围
 ```
@@ -80,6 +86,24 @@ docs/                  产品文档 / 开发计划 / MVP 范围
 4. `src/shared/ipc/schemas.ts` — 加 zod schema（缺了 `registerHandler` 编译不过）
 5. `src/main/ipc/<域>.ts` — `registerHandler(...)`；渲染层走 `src/renderer/api/` 封装，不要直接 `window.api`
 
+
+## Python worker
+
+主进程用 `python/ctext_worker/main.py` 拉起一个常驻侧车进程，stdin/stdout 走 NDJSON：
+
+```jsonc
+{"id":"r-1","method":"health.ping","params":{}}      // 请求
+{"id":"r-1","ok":true,"result":{"pid":1234}}         // 响应
+{"event":"worker.ready","data":{"version":"0.1.0"}}  // 事件（无 id）
+```
+
+- **stdout 只允许协议帧**。任何 `print` 都会变成坏帧（桥接层会跳过并记 warn）；诊断输出走 stderr，主进程按行转发到日志。
+- 崩溃自动重启，5 分钟内最多 3 次，超过进 `failed` 并拒绝后续请求（`retry()` 可手动恢复）。
+- 主进程被强杀时管道关闭，worker 读到 stdin EOF 自行退出，不留孤儿进程。
+- worker 内部是 4 线程池，响应顺序不保证，靠 `id` 匹配。
+- **新增方法**：在 `python/ctext_worker/methods/` 下写 `@method("parse.txt.outline")` 函数，再到 `main.py` 里 `import` 该模块即可。
+
+健康状态可从渲染层读：`window.api.invoke('system:worker-health')`（永抛不错，未就绪时 `worker` 为 `null`）。
 
 ## 已知环境问题
 

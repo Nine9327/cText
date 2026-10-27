@@ -1,5 +1,7 @@
 import { app, BrowserWindow, dialog, screen, session, shell } from 'electron'
 import { join } from 'node:path'
+import { disposePythonBridge, getPythonBridge } from './bridge'
+import { runBridgeSmoke } from './bridge/smoke'
 import { closeDatabase, initDatabase } from './db/connection'
 import { runDbSmoke } from './db/smoke'
 import { installIpc } from './ipc/registry'
@@ -179,7 +181,7 @@ if (!gotLock) {
     mainWindow.focus()
   })
 
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     applyCsp()
 
     // M0-04：先登记各域 handler，再由 registry 统一安装（未实现的通道装占位）
@@ -215,6 +217,17 @@ if (!gotLock) {
 
     createWindow()
 
+    // M0-05：worker 在后台拉起，不阻塞窗口（冷启动 ≤2s 的要求）。失败只影响解析，
+    // 不影响浏览已有数据，所以这里不等它、也不因它退出应用。
+    if (!app.isPackaged && process.env['CTEXT_BRIDGE_SMOKE'] === '1') {
+      const code = await runBridgeSmoke(mainWindow)
+      await disposePythonBridge()
+      app.exit(code)
+      return
+    }
+
+    getPythonBridge().start()
+
     if (!app.isPackaged && mainWindow) {
       if (process.env['CTEXT_IPC_SMOKE'] === '1') {
         void runIpcSmoke(mainWindow)
@@ -232,6 +245,10 @@ if (!gotLock) {
     if (process.platform !== 'darwin') app.quit()
   })
 
-  // 正常退出时关闭连接，让 WAL 落盘并清掉 -wal / -shm
-  app.on('will-quit', () => closeDatabase())
+  // 正常退出时关闭连接，让 WAL 落盘并清掉 -wal / -shm；
+  // 同时停掉 Python worker（关 stdin 让它自己退，避免留下孤儿进程）
+  app.on('will-quit', () => {
+    closeDatabase()
+    void disposePythonBridge()
+  })
 }

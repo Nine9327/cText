@@ -1,0 +1,12 @@
+# ctext-worker 解析依赖（M1-04 / M1-05 使用）。
+#
+# 装法：uv pip install -r python/ctext_worker/requirements.txt（装进仓库内 .venv）
+# M0-05 的 worker 骨架只用标准库，此文件为后续解析实现预先锁定版本；
+# health.ping 的 deps 字段会报告这些依赖是否就位。
+#
+# 注意：PyInstaller 打包（M0-07）前必须装齐，否则 --onedir 产物缺模块。
+ebooklib==0.18
+lxml==5.3.0
+pdfminer.six==20231228
+charset-normalizer==3.4.0
+Pillow==11.0.0

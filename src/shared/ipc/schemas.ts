@@ -20,6 +20,7 @@ export const echoRequestSchema = z.object({
 export const ipcSchemas = {
   'system:echo': echoRequestSchema,
   'system:info': z.void(),
+  'system:worker-health': z.void(),
   'window:get-state': z.void()
 } satisfies Partial<{ [K in keyof IpcMap]: z.ZodType<IpcMap[K]['input']> }>
 
