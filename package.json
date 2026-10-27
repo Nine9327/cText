@@ -30,7 +30,8 @@
     "dist": "electron-vite build && node scripts/dist.mjs --win",
     "verify:package": "node scripts/verify-package.mjs",
     "verify:roots": "node scripts/verify-roots.mjs",
-    "verify:scan": "node scripts/verify-scan.mjs"
+    "verify:scan": "node scripts/verify-scan.mjs",
+    "verify:dedupe": "node scripts/verify-dedupe.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

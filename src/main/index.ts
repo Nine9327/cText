@@ -16,6 +16,7 @@ import { attachWindowStateEvents, registerWindowIpc } from './ipc/window'
 import { installRootsMonitor, stopRootsMonitor } from './library/roots-monitor'
 import { runRootsSmoke } from './library/roots-smoke'
 import { runScannerSmoke } from './library/scanner-smoke'
+import { runDedupeSmoke } from './library/dedupe-smoke'
 import { runPackageSmoke } from './package/smoke'
 import { runUiSmoke } from './ui/smoke'
 import {
@@ -292,6 +293,18 @@ if (!gotLock) {
       }
       const failed = checks.filter((c) => !c.ok).length
       console.log(`SMOKE SCAN SUMMARY ${checks.length - failed}/${checks.length}`)
+      app.exit(failed === 0 ? 0 : 1)
+      return
+    }
+
+    // M1-03 自检：内容指纹与去重。用独立临时库，不碰真实书库
+    if (!app.isPackaged && process.env['CTEXT_DEDUPE_SMOKE'] === '1') {
+      const checks = await runDedupeSmoke()
+      for (const c of checks) {
+        console.log(`SMOKE DEDUPE ${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.detail ? ` (${c.detail})` : ''}`)
+      }
+      const failed = checks.filter((c) => !c.ok).length
+      console.log(`SMOKE DEDUPE SUMMARY ${checks.length - failed}/${checks.length}`)
       app.exit(failed === 0 ? 0 : 1)
       return
     }

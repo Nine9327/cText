@@ -53,6 +53,7 @@ uv pip install -r python/ctext_worker/requirements.txt --python .venv/Scripts/py
 | `pnpm verify:ui` | M0-08 侧栏验收（五入口切换、选中态唯一、书库过滤与离线态、两级折叠、空页面） |
 | `pnpm verify:roots` | M1-01 根目录验收（登记查重、掉线与恢复、事件广播、重定位、移除不删书） |
 | `pnpm verify:scan` | M1-02 扫描器验收（白名单、忽略、深度、符号链接防环、截断、取消、1000 文件性能） |
+| `pnpm verify:dedupe` | M1-03 指纹去重验收（指纹一致性、已知盲区、四类重复分流、跨根去重、批量查询） |
 | `pnpm verify:package` | M0-07 打包验收（构建 → 解包目录 → 真跑一次自检）；加 `--installer` 连安装/卸载一起验 |
 | `pnpm build:worker` | 用 PyInstaller 把 Python worker 打成 `resources/python/ctext-worker/` |
 | `pnpm check:env` / `pnpm check:env:electron` | 环境自检 |
@@ -166,6 +167,33 @@ docs/                  产品文档 / 开发计划 / MVP 范围
 - **不可读目录只记录不中断**：错误进 `stats.unreadable`，一个目录 EACCES 不该让整次扫描失败。
 - **结果按 `relPath` 升序**，导入流程依赖稳定顺序做进度估算。
 - **`ignore` 正则写错时静默跳过**，不让扫描崩；设置页（M5-01）必须在输入时校验能否编译。
+
+## 内容指纹与去重（M1-03）
+
+跨根目录判重靠 `books.file_hash`，算法是 **size + 首末 4KB 的 sha1**，不是全文哈希——200MB 的 TXT 全文哈希要读满 200MB，而首末各 4KB 只读 8KB，恒定耗时。450 个文件去重实测 66ms。
+
+```ts
+fingerprintFile(path)  // → { hash: 40位hex, size, algorithm: 'size+head4k+tail4k' }
+fullSha1(path)         // 兜底全文摘要，只在「疑似重复但用户要确认」时调
+dedupeFiles(rootId, files, { db })  // → { entries, unique, duplicates, stats }
+```
+
+四类重复必须分清，UI 文案各不相同：
+
+| kind | 含义 | 提示 |
+| --- | --- | --- |
+| `existing-path` | 同根目录同 `rel_path` 已有记录 | 这本书已在书库中（路径未变） |
+| `duplicate-in-db` | 内容指纹命中**别的**路径的书 | 书库里已有同一本（`D:\books\xx.txt`） |
+| `duplicate-in-batch` | 本批次内重复 | 本批次内重复（`duplicateOf` 给出首次出现的 relPath） |
+| `empty` | 0 字节 | 空文件，已跳过 |
+
+几条必须记住的约定：
+
+- **判定顺序是先 path 后 hash**。同 path 命中说明文件就在原地，此时报「书库里已有同一本书（另一个路径）」会让用户困惑。
+- **size ≤ 4KB 时首末块重叠，等价全文哈希**，没有盲区；只有 >8KB 才有理论盲区（首末相同、size 相同、中间不同会碰撞）。这是刻意取舍，`pnpm verify:dedupe` 里有一条断言专门记录它。**「仍要导入」必须先 `fullSha1` 复检**。
+- **去重只判定不写库**，UPSERT 在 M1-06。这样预览面板能反复跑去重而不产生副作用。
+- **软删除的书不参与去重**（`deleted_at IS NOT NULL` 落在部分索引之外），删了又放回来能重新入库。
+- **批量查 hash 按 400 一批切**：SQLite 的绑定参数有上限（旧版 999）。自检用 450 个文件覆盖跨批边界。
 
 ## 界面骨架（M0-08）
 
