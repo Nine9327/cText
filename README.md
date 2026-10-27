@@ -34,7 +34,7 @@ pnpm setup:python   # 建立 .python/ 解释器与 .venv/，均留在仓库内�
 uv pip install -r python/ctext_worker/requirements.txt --python .venv/Scripts/python.exe
 ```
 
-第二条命令装解析依赖（ebooklib / lxml / pdfminer.six / charset-normalizer / Pillow）。M0-05 的 worker 骨架只用标准库，但 `health.ping` 会报告这些依赖是否就位，缺了会在 `pnpm verify:bridge` 里显红。
+第二条命令装解析依赖（lxml / charset-normalizer / Pillow）。M0-05 的 worker 骨架只用标准库，但 `health.ping` 会报告这些依赖是否就位，缺了会在 `pnpm verify:bridge` 里显红。EPUB 解析自 M1-05 起改用标准库 `zipfile` + `lxml`，不再依赖 ebooklib。
 
 ## 常用命令
 
@@ -55,6 +55,7 @@ uv pip install -r python/ctext_worker/requirements.txt --python .venv/Scripts/py
 | `pnpm verify:scan` | M1-02 扫描器验收（白名单、忽略、深度、符号链接防环、截断、取消、1000 文件性能） |
 | `pnpm verify:dedupe` | M1-03 指纹去重验收（指纹一致性、已知盲区、四类重复分流、跨根去重、批量查询） |
 | `pnpm verify:txt` | M1-04 TXT 解析验收（20 个编码样本识别率、章节分级、元数据、bridge 链路） |
+| `pnpm verify:epub` | M1-05 EPUB 解析验收（26 个结构样本的目录层级、封面提取率、DRM/损坏识别、bridge 链路） |
 | `pnpm verify:package` | M0-07 打包验收（构建 → 解包目录 → 真跑一次自检）；加 `--installer` 连安装/卸载一起验 |
 | `pnpm build:worker` | 用 PyInstaller 把 Python worker 打成 `resources/python/ctext-worker/` |
 | `pnpm check:env` / `pnpm check:env:electron` | 环境自检 |
@@ -73,7 +74,7 @@ src/
 │  ├─ index.ts         app 生命周期、单实例锁、窗口创建、日志/兜底初始化
 │  ├─ ipc/             通道注册（registry / system / window / log / roots）+ 冒烟
 │  ├─ db/              连接、PRAGMA、版本化迁移、DDL；repositories/ 是各表的 SQL 封装
-│  ├─ library/         书库业务：根目录探测与状态监测（roots-monitor）、目录扫描（scanner）+ 各自自检
+│  ├─ library/         书库业务：根目录探测与状态监测（roots-monitor）、目录扫描（scanner）、指纹去重、解析链路 + 各自自检
 │  ├─ bridge/          Python worker：进程管理、NDJSON 协议、定位启动命令
 │  ├─ log/             结构化日志：JSON Lines 落盘、按天滚动、级别过滤、计时
 │  ├─ errors/          全局异常兜底（uncaughtException / 渲染进程退出 / preload 失败…）
@@ -223,6 +224,32 @@ dedupeFiles(rootId, files, { db })  // → { entries, unique, duplicates, stats 
 - **一章都没识别出来时返回单章「全文」**。不是所有 TXT 都有章节标记，没有兜底阅读器会拿到空目录。
 - **元数据优先级：书名看文件名，作者看正文**（「作者：」在正文里比文件名可靠）。
 - 验收 `pnpm verify:txt` 分两段：`python/smoke_parse.py` 测算法（能在 Python 侧造 GBK/UTF-16 样本），`parse-bridge-smoke.ts` 测链路。
+
+## EPUB 解析（M1-05）
+
+实现在 `python/ctext_worker/epub.py`（底层）+ `methods/parse_epub.py`（契约）：
+
+| 方法 | 入参 | 返回 |
+| --- | --- | --- |
+| `parse.epub.toc` | `path` | `{ chapters: [{idx, title, level, href}], chapterCount, source, spineCount, version }` |
+| `parse.meta` | `path`, `format: "epub"` | `{ title, author, intro, lang, publisher, pubDate, coverHref, coverSource, coverPath: null }` |
+| `cover.extract` | `path`, `destDir`（绝对路径） | `{ coverPath, coverFile, bytes, width, height, source }` |
+
+**没有用 ebooklib**，直接 `zipfile` + `lxml`：它会把全部文档读进内存，且失败时只抛 `BadZipFile`，无法区分「包坏了 / 不是 EPUB / 受 DRM 保护」——而导入结果面板必须按原因分类。
+
+几个必须记住的约定：
+
+- **`href` 是 zip 内完整路径**（如 `OEBPS/Text/ch1.xhtml`），已做 URL 解码、`..` 折叠、去 fragment。M2-03 拿到就能 `zip.read()`。
+- **`level` 由目录树深度决定，不靠标题文字猜**：树只有一层 → 顶层 `level = 1`（章）；两层及以上 → 顶层 `level = 0`（卷），往下 +1，超过 2 压到 2。与 TXT 语义完全一致。
+- **包装层只按标题拆**（`目录`/`正文`/`Contents`/`TOC`）。`目录 > 章` 与 `第一部 > 第一卷 > 章` 形状相同，按形状拆会吃掉真正的分部标题。
+- **非链接的分卷标题保留，anchor 继承首个子节点的 href**。否则那一级会消失，或者 M2 拿到一个打不开的章节。
+- **目录来源优先级 nav（EPUB3）→ ncx（EPUB2）→ spine 兜底**。`source` 字段如实回传用了哪条。
+- **`parse.meta` 不写文件**。它回传 `coverHref` / `coverSource` 提示，真正落盘只在 `cover.extract`。封面文件名是内容 sha1，天然幂等。
+- **封面按魔数判格式，不信清单声明**：有大量 EPUB 把 `cover.xhtml` 声明成 `image/jpeg`。内容以 `<` 开头时只认 SVG，不再退回扩展名。
+- **DRM 判定逐条 `EncryptedData`**，且**字体混淆（IDPF/Adobe）不算 DRM**——那是 OCF 标准做法，误判会拒掉一大片正规出版书。
+- 失败统一报 `E_PARSE_FAILED`（`文件解析失败，可能已损坏或加密`），不与 `E_IO` / `E_INVALID_ARGUMENT` 混用。
+
+验收 `pnpm verify:epub` 分三段：构建 → `python/smoke_epub.py --emit <dir>`（26 个按结构生成的样本，82 项断言，封面提取率 5/5）→ `epub-smoke.ts` 走真实链路（25 项，含封面跨进程落盘与错误码透传），共 **107/107**。样本生成器是 `python/make_epub.py`，按结构参数化，需要新的 EPUB 变体时加一条用例即可。
 
 ## 界面骨架（M0-08）
 

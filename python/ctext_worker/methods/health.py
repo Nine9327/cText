@@ -17,7 +17,8 @@ STARTED_AT = time.time()
 
 # M1-04/M1-05 会用到的依赖，此处只探测是否可导入（find_spec 不真正加载）。
 # pdfminer 已移除：D1 决策不做 PDF，省一份打包体积
-PARSE_DEPS = ("ebooklib", "lxml", "charset_normalizer", "PIL")
+# ebooklib 已移除（M1-05）：EPUB 改用标准库 zipfile + lxml，理由见 epub.py
+PARSE_DEPS = ("lxml", "charset_normalizer", "PIL")
 
 
 def _dep_available(module: str) -> bool:

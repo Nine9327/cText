@@ -21,6 +21,11 @@ ERROR_CONFLICT = "E_CONFLICT"
 ERROR_IO = "E_IO"
 ERROR_TIMEOUT = "E_TIMEOUT"
 ERROR_INTERNAL = "E_INTERNAL"
+# M1-05 新增：文件能打开但内容坏了/加密了。
+# 不复用 E_IO 是因为导入结果面板要按原因分类展示
+# （「文件损坏」与「磁盘读不出来」的用户动作完全不同），
+# 也不复用 E_INVALID_ARGUMENT，那不是调用方的错。
+ERROR_PARSE_FAILED = "E_PARSE_FAILED"
 
 
 class WorkerError(Exception):

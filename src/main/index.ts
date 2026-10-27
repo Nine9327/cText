@@ -18,6 +18,7 @@ import { runRootsSmoke } from './library/roots-smoke'
 import { runScannerSmoke } from './library/scanner-smoke'
 import { runDedupeSmoke } from './library/dedupe-smoke'
 import { runParseBridgeSmoke } from './library/parse-bridge-smoke'
+import { runEpubSmoke } from './library/epub-smoke'
 import { runPackageSmoke } from './package/smoke'
 import { runUiSmoke } from './ui/smoke'
 import {
@@ -355,6 +356,20 @@ if (!gotLock) {
       }
       const failed = checks.filter((c) => !c.ok).length
       console.log(`SMOKE PARSE SUMMARY ${checks.length - failed}/${checks.length}`)
+      await disposePythonBridge()
+      app.exit(failed === 0 ? 0 : 1)
+      return
+    }
+
+    // M1-05 自检：EPUB 解析经 Python bridge 的完整链路。
+    // 样本由 verify-epub.mjs 用 python/smoke_epub.py --emit 先铺好，两边共用同一批文件
+    if (!app.isPackaged && process.env['CTEXT_EPUB_SMOKE'] === '1') {
+      const checks = await runEpubSmoke()
+      for (const c of checks) {
+        console.log(`SMOKE EPUBCHAIN ${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.detail ? ` (${c.detail})` : ''}`)
+      }
+      const failed = checks.filter((c) => !c.ok).length
+      console.log(`SMOKE EPUBCHAIN SUMMARY ${checks.length - failed}/${checks.length}`)
       await disposePythonBridge()
       app.exit(failed === 0 ? 0 : 1)
       return

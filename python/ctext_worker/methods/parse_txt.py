@@ -22,7 +22,8 @@ from __future__ import annotations
 import os
 import re
 
-from rpc import ERROR_INVALID_ARGUMENT, ERROR_NOT_FOUND, ERROR_NOT_IMPLEMENTED, WorkerError, method
+from paths import SUPPORTED_FORMATS, format_of, require_path  # noqa: F401  (对外仍可 parse_txt.xxx)
+from rpc import ERROR_INVALID_ARGUMENT, WorkerError, method
 from textenc import detect_encoding, is_wide_encoding, normalize_encoding
 
 # 中文数字 + 阿拉伯数字。含大写与「〇」「两」这些实际会出现在章节名里的写法
@@ -53,27 +54,7 @@ RE_WEAK = re.compile(r"^\d{1,4}(?:[.、．]\s*|\s+)\S")
 
 RE_FIELD = re.compile(r"^\s*(书名|作者|著者|简介|内容简介|文案|状态|字数|类别|标签)\s*[:：]\s*(.*)$")
 
-SUPPORTED_FORMATS = {".txt": "txt", ".epub": "epub"}
-
 CJK_RANGE = ("\u4e00", "\u9fff")
-
-
-# ---------------------------------------------------------------- 参数与路径
-
-
-def require_path(params: dict) -> str:
-    """校验并返回存在的文件路径。错误文案不包含路径本身（脱敏要求）。"""
-    path = params.get("path")
-    if not isinstance(path, str) or not path.strip():
-        raise WorkerError(ERROR_INVALID_ARGUMENT, "缺少 path")
-    if not os.path.isfile(path):
-        raise WorkerError(ERROR_NOT_FOUND, "文件不存在或无法访问")
-    return path
-
-
-def format_of(path: str) -> str | None:
-    """按扩展名判定格式。D1 决策：只认 txt / epub，其余返回 None"""
-    return SUPPORTED_FORMATS.get(os.path.splitext(path)[1].lower())
 
 
 # ---------------------------------------------------------------- 章节识别
@@ -309,7 +290,9 @@ def parse_detect(params: dict) -> dict:
     if fmt is None:
         raise WorkerError(ERROR_INVALID_ARGUMENT, "不支持的文件格式")
 
-    encoding, _ = detect_encoding(path)
+    # EPUB 是 zip 容器，对它跑编码探测既没意义也很贵（要读 16KB 二进制）。
+    # encoding 回 None 而不是空串，调用方能据此区分「未探测」与「探测结果为空」
+    encoding = None if fmt == "epub" else detect_encoding(path)[0]
     return {"format": fmt, "encoding": encoding, "size": os.path.getsize(path)}
 
 
@@ -320,13 +303,14 @@ def parse_meta(params: dict) -> dict:
     if fmt not in ("txt", "epub"):
         raise WorkerError(ERROR_INVALID_ARGUMENT, "不支持的文件格式")
 
+    if fmt == "epub":
+        # 延迟导入：让「只解析 TXT」的场景不必加载 lxml/zip 相关的模块
+        from methods.parse_epub import epub_meta
+
+        return epub_meta(path)
+
     encoding, bom_len = detect_encoding(path)
-
-    if fmt == "txt":
-        return txt_meta(path, encoding, bom_len)
-
-    # M1-05 实现 EPUB：OPF 元数据 + 内嵌封面
-    raise WorkerError(ERROR_NOT_IMPLEMENTED, "EPUB 元数据解析将在 M1-05 提供")
+    return txt_meta(path, encoding, bom_len)
 
 
 @method("parse.txt.outline")

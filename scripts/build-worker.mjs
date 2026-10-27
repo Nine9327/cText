@@ -33,7 +33,11 @@ const args = new Set(process.argv.slice(2))
 const skipCheck = args.has('--skip-check')
 
 /** 打包进产物的解析依赖：worker 里是 find_spec 探测，静态分析看不到，必须显式声明 */
-const HIDDEN_IMPORTS = ['ebooklib', 'lxml', 'pdfminer', 'charset_normalizer', 'PIL']
+// ebooklib / pdfminer 已移除：D1 不做 PDF；M1-05 起 EPUB 用标准库 zipfile + lxml
+const HIDDEN_IMPORTS = ['lxml', 'charset_normalizer', 'PIL']
+
+/** 产物里必须能注册上的方法。缺一个就说明丢了模块，症状是「进程能起、一调就报未知方法」 */
+const REQUIRED_METHODS = ['health.ping', 'parse.detect', 'parse.meta', 'parse.txt.outline', 'parse.epub.toc', 'cover.extract']
 
 function fail(message) {
   console.error(`\n✗ ${message}`)
@@ -165,6 +169,9 @@ function finish() {
       .filter(([, ok]) => !ok)
       .map(([name]) => name)
     if (missing.length > 0) problems.push(`产物缺少依赖：${missing.join(', ')}`)
+    const methods = r?.methods ?? []
+    const absent = REQUIRED_METHODS.filter((m) => !methods.includes(m))
+    if (absent.length > 0) problems.push(`产物缺少方法：${absent.join(', ')}`)
   }
 
   if (problems.length > 0) {

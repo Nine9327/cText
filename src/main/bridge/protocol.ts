@@ -202,6 +202,9 @@ const KNOWN_CODES: readonly ErrorCode[] = [
   'E_CONFLICT',
   'E_IO',
   'E_TIMEOUT',
+  // M1-05：worker 侧的「文件坏了/加密了」必须原样透传，
+  // 归成 E_INTERNAL 会让导入结果面板无法区分「解析失败」与「程序出错」
+  'E_PARSE_FAILED',
   'E_INTERNAL'
 ]
 

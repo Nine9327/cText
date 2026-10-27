@@ -298,9 +298,10 @@ def run_detect_and_errors(tmp: str) -> None:
         lambda: parse_detect({"path": os.path.join(tmp, "nope.txt")}),
     )
     expect_error("缺少 path 被拒", "E_INVALID_ARGUMENT", lambda: parse_detect({}))
+    # EPUB 分支在 M1-05 已实现，损坏的样本应当报「解析失败」而不是「未实现」
     expect_error(
-        "EPUB 元数据暂未实现（M1-05）",
-        "E_NOT_IMPLEMENTED",
+        "损坏的 EPUB 报 E_PARSE_FAILED",
+        "E_PARSE_FAILED",
         lambda: parse_meta({"path": write_bytes(os.path.join(tmp, "x.epub"), b"PK\x03\x04"), "format": "epub"}),
     )
 

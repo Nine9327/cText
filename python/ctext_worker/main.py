@@ -33,6 +33,7 @@ from version import PROTOCOL, __version__  # noqa: E402
 
 # 注册方法（导入即注册）
 import methods.health  # noqa: E402,F401
+import methods.parse_epub  # noqa: E402,F401
 import methods.parse_txt  # noqa: E402,F401
 
 # 诊断方法只在开发/自检时存在：主进程仅在非打包环境设置 CTEXT_WORKER_DEBUG=1，

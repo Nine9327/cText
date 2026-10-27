@@ -20,6 +20,8 @@ export const ERROR_CODES = {
   io: 'E_IO',
   /** 超时（Python worker、网络书源） */
   timeout: 'E_TIMEOUT',
+  /** 文件能打开但内容坏了 / 加密 / 不是声明的那种格式（M1-05） */
+  parseFailed: 'E_PARSE_FAILED',
   /** 未预期异常，message 一律脱敏为通用文案 */
   internal: 'E_INTERNAL'
 } as const
@@ -43,6 +45,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   E_CONFLICT: '数据冲突，请刷新后重试',
   E_IO: '读写失败，请检查磁盘或权限',
   E_TIMEOUT: '操作超时，请稍后重试',
+  E_PARSE_FAILED: '文件解析失败，可能已损坏或加密',
   E_INTERNAL: '内部错误，请查看日志'
 }
 

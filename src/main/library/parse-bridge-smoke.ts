@@ -107,10 +107,12 @@ export async function runParseBridgeSmoke(): Promise<Check[]> {
     check('health.ping 报告 parse 方法已注册', health.methods.includes('parse.txt.outline'), health.methods.join(','))
     check(
       '解析依赖就位',
-      ['ebooklib', 'lxml', 'charset_normalizer', 'PIL'].every((name) => health.deps[name] === true),
+      ['lxml', 'charset_normalizer', 'PIL'].every((name) => health.deps[name] === true),
       JSON.stringify(health.deps)
     )
     check('pdfminer 已从依赖清单移除（D1）', health.deps['pdfminer'] === undefined, JSON.stringify(Object.keys(health.deps)))
+    // M1-05 起 EPUB 用标准库 zipfile + lxml 直接解析，ebooklib 不再是依赖
+    check('ebooklib 已从依赖清单移除（M1-05）', health.deps['ebooklib'] === undefined, JSON.stringify(Object.keys(health.deps)))
   } catch (err) {
     check('自检执行未抛异常', false, err instanceof Error ? err.message : String(err))
   } finally {
