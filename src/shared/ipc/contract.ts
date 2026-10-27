@@ -68,6 +68,15 @@ export type IpcMap = {
   'shelves:list': { input: void; output: ShelfDTO[] }
   'shelves:create': { input: { name: string }; output: ShelfDTO }
   'shelves:addBooks': { input: { shelfId: string; bookIds: string[] }; output: void }
+  'shelves:get': { input: { shelfId: string }; output: ShelfDTO | null }
+
+  // 书籍列表（M1-08）
+  'books:list': {
+    input: { rootId?: string; favoritesOnly?: boolean; shelfId?: string; offset: number; limit: number }
+    output: Paged<BookDTO>
+  }
+  'books:count': { input: { rootId?: string; favoritesOnly?: boolean }; output: { total: number } }
+  'books:recent': { input: { rootId?: string; limit?: number }; output: BookDTO[] }
 
   // 导入
   'import:pickFolder': { input: void; output: { path: string } | null }

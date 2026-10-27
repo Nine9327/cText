@@ -58,6 +58,7 @@ uv pip install -r python/ctext_worker/requirements.txt --python .venv/Scripts/py
 | `pnpm verify:epub` | M1-05 EPUB 解析验收（26 个结构样本的目录层级、封面提取率、DRM/损坏识别、bridge 链路） |
 | `pnpm verify:import` | M1-06 导入队列验收（预览分类、首次/重复导入、覆盖、失败隔离、取消一致性、子目录归属） |
 | `pnpm verify:import:ui` | M1-07 导入交互验收（真实拖放 → 预览分类 → 导入 → 结果 → 重复不脏 → 取消） |
+| `pnpm verify:list` | M1-08 万本压测（books:list P95、虚拟 DOM 有界、滚动帧率、触底分页） |
 | `pnpm verify:package` | M0-07 打包验收（构建 → 解包目录 → 真跑一次自检）；加 `--installer` 连安装/卸载一起验 |
 | `pnpm build:worker` | 用 PyInstaller 把 Python worker 打成 `resources/python/ctext-worker/` |
 | `pnpm check:env` / `pnpm check:env:electron` | 环境自检 |

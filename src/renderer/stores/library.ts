@@ -1,111 +1,201 @@
 /**
- * 书库视图状态（当前根目录、各入口的书籍集合）。
+ * 书库视图状态（M1-08 起为真实数据）。
  *
- * M0-08 阶段数据来自 `mock/library.ts`，但**接口形状按 M1 的真实查询设计**：
- * 都是「按当前根目录过滤后的列表」+ 计数，M1 只需把 computed 换成 useQuery 即可，
- * 侧栏组件不用改。
+ * 三条数据通路：
+ *   - 根目录：roots:list + roots:changed 订阅（M1-01 的监测会广播状态变化）
+ *   - 书籍：books:list 增量分页（SQL 下推），切换根目录 / 书架 / 收藏域时重置
+ *   - 书架：shelves:list（管理操作属 M3-02，这里只读）
  *
- * 为什么选中根目录放在 store 而不是路由 query：书库切换是**全局过滤条件**，
- * 切换后侧栏、列表、收藏、书架四个入口同时生效，放路由会四处透传。
- * 也刻意**不持久化**——下次启动回到「全部书库」，避免用户以为书丢了（见计划 §3.8）。
+ * 为什么手写分页而不用 TanStack Query：列表是**增量追加**（虚拟滚动触底
+ * loadMore），query 缓存对这种形态不顺手；且 roots:changed 的失效时机由
+ * 主进程广播决定，直接订阅更直白。
  */
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import {
-  ALL_ROOTS_ID,
-  favoriteIds,
-  mockBooks,
-  mockRoots,
-  mockShelves,
-  mockSources,
-  type MockBook,
-  type MockRoot,
-  type MockShelf,
-  type MockSource
-} from '@/mock/library'
+import type { BookDTO, RootDTO, ShelfDTO } from '@shared/dto'
+import { call, on } from '@/api/client'
 
-export interface ShelfWithBooks extends MockShelf {
-  count: number
-  books: MockBook[]
+/** 「全部书库」是渲染层虚拟出来的入口，不对应任何 roots 行 */
+export const ALL_ROOTS_ID = 'all'
+
+/** 每页拉多少本。120 张卡在 1080p 下约两屏半，触底加载无感 */
+const PAGE_SIZE = 120
+
+/** 当前查询域。三个入口共用一条数据通路（详见 store 内注释） */
+export interface LibraryDomain {
+  rootId?: string
+  favoritesOnly?: boolean
+  shelfId?: string
+}
+
+export interface RootView {
+  id: string
+  label: string
+  path: string
+  online: boolean
+  bookCount: number
 }
 
 export const useLibraryStore = defineStore('library', () => {
-  const roots = ref<MockRoot[]>(mockRoots)
+  const roots = ref<RootView[]>([])
+  const shelves = ref<ShelfDTO[]>([])
   const activeRootId = ref<string>(ALL_ROOTS_ID)
 
-  const activeRoot = computed<MockRoot>(
-    () => roots.value.find((root) => root.id === activeRootId.value) ?? roots.value[0]!
+  const books = ref<BookDTO[]>([])
+  const booksTotal = ref(0)
+  const loading = ref(false)
+  const loaded = ref(false)
+  const loadError = ref<string | null>(null)
+
+  const favCount = ref(0)
+  const recent = ref<BookDTO[]>([])
+
+  const domain = ref<LibraryDomain>({})
+
+  /** 当前生效的根目录；「全部书库」时 rootId 传 undefined */
+  const activeRoot = computed<RootView>(
+    () =>
+      roots.value.find((root) => root.id === activeRootId.value) ?? {
+        id: ALL_ROOTS_ID,
+        label: '全部书库',
+        path: '',
+        online: true,
+        bookCount: 0
+      }
   )
+  const isAllRoots = computed(() => activeRootId.value === ALL_ROOTS_ID)
+  /** 根目录离线 → 该域内书籍全部只可看不可读（横幅 + 角标的依据） */
+  const activeRootOnline = computed(() => isAllRoots.value || activeRoot.value.online)
 
-  /** 当前根目录范围内的书；「全部书库」不过滤 */
-  const books = computed<MockBook[]>(() =>
-    activeRootId.value === ALL_ROOTS_ID
-      ? mockBooks
-      : mockBooks.filter((book) => book.rootId === activeRootId.value)
-  )
+  const totalBookCount = computed(() => roots.value.reduce((sum, root) => sum + root.bookCount, 0))
+  const rootCount = (rootId: string): number => {
+    if (rootId === ALL_ROOTS_ID) return totalBookCount.value
+    return roots.value.find((root) => root.id === rootId)?.bookCount ?? 0
+  }
 
-  const favorites = computed<MockBook[]>(() =>
-    books.value.filter((book) => favoriteIds.includes(book.id))
-  )
+  function scope(): LibraryDomain {
+    return { ...domain.value }
+  }
 
-  const shelves = computed<ShelfWithBooks[]>(() =>
-    mockShelves.map((shelf) => {
-      const shelfBooks = mockBooks.filter((book) => shelf.bookIds.includes(book.id))
-      return { ...shelf, count: shelfBooks.length, books: shelfBooks }
-    })
-  )
+  async function loadRoots(): Promise<void> {
+    const rows = await call('roots:list')
+    roots.value = rows.map((row: RootDTO) => ({
+      id: row.id,
+      label: row.label,
+      path: row.path,
+      online: row.state === 'online',
+      bookCount: row.bookCount
+    }))
+    // 当前选中的根目录被移除时回到「全部书库」，不能停留在幽灵 id 上
+    if (activeRootId.value !== ALL_ROOTS_ID && !roots.value.some((root) => root.id === activeRootId.value)) {
+      activeRootId.value = ALL_ROOTS_ID
+    }
+  }
 
-  const sources = computed<MockSource[]>(() => mockSources)
+  async function loadShelves(): Promise<void> {
+    shelves.value = await call('shelves:list')
+  }
 
-  /** 最近阅读：有进度且不在离线态，取前三。必须跟着根目录过滤走，否则切到移动硬盘还显示别处的书 */
-  const recent = computed<MockBook[]>(() =>
-    books.value.filter((book) => book.progress > 0 && book.state !== 'offline').slice(0, 3)
-  )
+  async function loadFavCount(): Promise<void> {
+    const { total } = await call('books:count', { ...scope(), favoritesOnly: true })
+    favCount.value = total
+  }
 
-  /** 根目录计数：全部书库取总数，其余取该目录下的数量 */
-  const rootCount = (rootId: string): number =>
-    rootId === ALL_ROOTS_ID
-      ? mockBooks.length
-      : mockBooks.filter((book) => book.rootId === rootId).length
+  async function loadRecent(): Promise<void> {
+    recent.value = await call('books:recent', { ...scope(), limit: 3 })
+  }
 
-  const total = computed(() => mockBooks.length)
-  const offlineCount = computed(() => books.value.filter((book) => book.state === 'offline').length)
+  async function loadPage(offset: number): Promise<void> {
+    loading.value = true
+    loadError.value = null
+    try {
+      const page = await call('books:list', { ...scope(), offset, limit: PAGE_SIZE })
+      // 竞态保护：响应回来时域可能已经切走（快速连点根目录）。
+      // 简单可靠的判据是「loaded 已经被本轮置位」之外的版本号——
+      // 这里用 offset===0 整表替换 + 追加只发生在本轮域内，切域走 reload(0)
+      books.value = offset === 0 ? page.items : [...books.value, ...page.items]
+      booksTotal.value = page.total
+      loaded.value = true
+    } catch (err) {
+      loadError.value = err instanceof Error ? err.message : '加载书籍失败'
+      if (offset === 0) {
+        books.value = []
+        booksTotal.value = 0
+      }
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /** 域切换 / 数据变更后的整表重置 */
+  async function reload(): Promise<void> {
+    await Promise.all([loadRoots(), loadShelves(), loadFavCount(), loadRecent()])
+    await loadPage(0)
+  }
+
+  async function loadMore(): Promise<void> {
+    if (loading.value || books.value.length >= booksTotal.value) return
+    await loadPage(books.value.length)
+  }
 
   function selectRoot(rootId: string): boolean {
-    if (!roots.value.some((root) => root.id === rootId)) return false
+    if (rootId !== ALL_ROOTS_ID && !roots.value.some((root) => root.id === rootId)) return false
     activeRootId.value = rootId
+    // 切换书库时若当前在收藏页，域要跟着换根目录（保持「收藏随根目录过滤」）
+    if (domain.value.favoritesOnly) {
+      domain.value = { ...scope0(), favoritesOnly: true }
+    }
+    void reload()
     return true
   }
 
-  function shelfById(shelfId: string | undefined): ShelfWithBooks | null {
-    if (!shelfId) return null
-    return shelves.value.find((shelf) => shelf.id === shelfId) ?? null
+  /** 与书库切换器解耦的根目录域（不含收藏标记） */
+  function scope0(): { rootId?: string } {
+    return isAllRoots.value ? {} : { rootId: activeRootId.value }
   }
 
-  function booksOfShelf(shelfId: string | undefined): MockBook[] {
-    return shelfById(shelfId)?.books ?? []
+  /** 由路由驱动的域切换（LibraryView watch route 调用） */
+  function setDomain(next: LibraryDomain): void {
+    domain.value = next
+    void reload()
   }
 
-  function sourceById(sourceId: string | undefined): MockSource | null {
-    if (!sourceId) return null
-    return sources.value.find((source) => source.id === sourceId) ?? null
+  /** books 表有任何变化（导入完成 / 根目录上下线）后的统一刷新入口 */
+  function refresh(): void {
+    void reload()
+  }
+
+  /** 应用启动时调用一次；roots:changed 的订阅与应用同生命周期 */
+  function bindEvents(): void {
+    try {
+      on('roots:changed', () => refresh())
+    } catch {
+      // 浏览器直连模式没有 preload
+    }
   }
 
   return {
     roots,
+    shelves,
+    totalBookCount,
     activeRootId,
     activeRoot,
+    isAllRoots,
+    activeRootOnline,
     books,
-    favorites,
-    shelves,
-    sources,
+    booksTotal,
+    loading,
+    loaded,
+    loadError,
+    favCount,
     recent,
-    total,
-    offlineCount,
-    rootCount,
+    pageSize: PAGE_SIZE,
+    loadMore,
+    reload,
+    refresh,
     selectRoot,
-    shelfById,
-    booksOfShelf,
-    sourceById
+    setDomain,
+    rootCount,
+    bindEvents
   }
 })

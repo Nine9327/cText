@@ -167,6 +167,153 @@ function asCount(row: { n: number } | undefined): number {
   return row?.n ?? 0
 }
 
+// ---------------------------------------------------------------- 列表查询（M1-08）
+
+/** BookDTO 的行来源。root_state 供 offline 判定（书籍记录保留，只是读不到文件） */
+interface BookRow {
+  id: string
+  title: string
+  author: string | null
+  series: string | null
+  format: string
+  favorite: number
+  read_state: string
+  progress: number
+  chapter_count: number
+  root_id: string | null
+  source_type: string
+  last_read_at: number | null
+  created_at: number
+  updated_at: number
+  root_state: string | null
+}
+
+const BOOK_SELECT = `
+  SELECT books.id, books.title, books.author, books.series, books.format,
+         books.favorite, books.read_state, books.progress, books.chapter_count,
+         books.root_id, books.source_type, books.last_read_at,
+         books.created_at, books.updated_at,
+         library_roots.state AS root_state
+  FROM books LEFT JOIN library_roots ON library_roots.id = books.root_id
+  WHERE books.deleted_at IS NULL
+`
+
+function toBookDTO(row: BookRow): import('@shared/dto').BookDTO {
+  return {
+    id: row.id,
+    title: row.title,
+    author: row.author,
+    series: row.series,
+    format: row.format as import('@shared/dto').BookFormat,
+    coverUrl: null, // 封面自定义协议属 M2-03；此前 UI 用「书名 + 哈希取色」占位
+    favorite: row.favorite === 1,
+    readState: row.read_state as import('@shared/dto').ReadState,
+    progress: row.progress,
+    chapterCount: row.chapter_count,
+    rootId: row.root_id,
+    sourceType: row.source_type as import('@shared/dto').BookSourceType,
+    // 离线只属于本地书：网络书没有「根目录离线」的概念
+    offline: row.source_type === 'local' && row.root_id !== null && row.root_state === 'offline',
+    lastReadAt: row.last_read_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  }
+}
+
+export interface BookListQuery {
+  /** 缺省 = 全部书库 */
+  rootId?: string
+  favoritesOnly?: boolean
+  shelfId?: string
+  offset: number
+  limit: number
+}
+
+/**
+ * 书籍列表（SQL 分页下推）。排序固定「导入时间倒序」——ULID 的字典序即时间序，
+ * id 后缀保证同毫秒插入的顺序稳定；五排序在 M1-09 扩展。
+ */
+export function listBooks(db: Db, query: BookListQuery): { items: import('@shared/dto').BookDTO[]; total: number } {
+  const conditions: string[] = []
+  const params: unknown[] = []
+  if (query.rootId) {
+    conditions.push('books.root_id = ?')
+    params.push(query.rootId)
+  }
+  if (query.favoritesOnly) {
+    conditions.push('books.favorite = 1')
+  }
+  if (query.shelfId) {
+    conditions.push('books.id IN (SELECT book_id FROM shelf_books WHERE shelf_id = ?)')
+    params.push(query.shelfId)
+  }
+  const where = conditions.length > 0 ? ` AND ${conditions.join(' AND ')}` : ''
+
+  const total = asCount(
+    db.prepare(`SELECT COUNT(*) AS n FROM books WHERE deleted_at IS NULL${where}`).get(...params) as { n: number }
+  )
+  const rows = db
+    .prepare(`${BOOK_SELECT}${where} ORDER BY books.created_at DESC, books.id DESC LIMIT ? OFFSET ?`)
+    .all(...params, query.limit, query.offset) as BookRow[]
+
+  return { items: rows.map(toBookDTO), total }
+}
+
+/** 最近阅读：有进度的在线书，按最近阅读时间取前 N。供书库首页的「最近阅读」区 */
+export function recentBooks(db: Db, rootId: string | undefined, limit: number): import('@shared/dto').BookDTO[] {
+  const cond = rootId ? ' AND books.root_id = ?' : ''
+  const params = rootId ? [rootId] : []
+  const rows = db
+    .prepare(
+      `${BOOK_SELECT}${cond}
+       AND books.progress > 0 AND books.last_read_at IS NOT NULL
+       AND (books.root_id IS NULL OR library_roots.state = 'online')
+       ORDER BY books.last_read_at DESC LIMIT ?`
+    )
+    .all(...params, limit) as BookRow[]
+  return rows.map(toBookDTO)
+}
+
+export function countBooks(
+  db: Db,
+  query: { rootId?: string; favoritesOnly?: boolean }
+): number {
+  const conditions: string[] = []
+  const params: unknown[] = []
+  if (query.rootId) {
+    conditions.push('root_id = ?')
+    params.push(query.rootId)
+  }
+  if (query.favoritesOnly) conditions.push('favorite = 1')
+  const where = conditions.length > 0 ? ` AND ${conditions.join(' AND ')}` : ''
+  return asCount(db.prepare(`SELECT COUNT(*) AS n FROM books WHERE deleted_at IS NULL${where}`).get(...params) as {
+    n: number
+  })
+}
+
+export function listShelves(db: Db): import('@shared/dto').ShelfDTO[] {
+  const rows = db
+    .prepare(
+      `SELECT shelves.id, shelves.name, shelves.icon, shelves.sort, shelves.created_at,
+              (SELECT COUNT(*) FROM shelf_books sb JOIN books b ON b.id = sb.book_id
+                WHERE sb.shelf_id = shelves.id AND b.deleted_at IS NULL) AS book_count
+       FROM shelves ORDER BY shelves.sort, shelves.created_at`
+    )
+    .all() as { id: string; name: string; icon: string | null; sort: number; created_at: number; book_count: number }[]
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    icon: row.icon,
+    sort: row.sort,
+    bookCount: row.book_count,
+    createdAt: row.created_at
+  }))
+}
+
+export function getShelf(db: Db, shelfId: string): import('@shared/dto').ShelfDTO | null {
+  return listShelves(db).find((shelf) => shelf.id === shelfId) ?? null
+}
+
 export function booksRepo(db: Db = getDb()) {
   return {
     count(): number {

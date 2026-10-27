@@ -83,7 +83,14 @@ const UI_CASES = String.raw`
     const missing = entries.filter(([, sel]) => !q(sel)).map(([name]) => name)
     push('五个入口齐全', missing.length === 0, missing.length ? '缺少 ' + missing.join('、') : '书库切换器 + 4 个入口')
 
-    await waitFor(() => route() === '/library' && q('[data-book-count]'))
+    // M1-08 起列表是异步加载（IPC → SQL），计数要等到数据到位而不是元素出现
+    const waitForCount = (expected) =>
+      waitFor(() => route().startsWith('/library') || route().startsWith('/favorites') || route().startsWith('/shelves')
+        ? (txt(q('[data-book-count]')) === expected ? expected : null)
+        : null, 6000)
+    await waitFor(() => route() === '/library' && waitForCount0())
+    function waitForCount0() { return txt(q('[data-book-count]')) !== '0 本' && !!q('[data-book-count]') }
+    await waitForCount('16 本')
     checkRoute('/library')
     checkActive('全部书籍')
     push('首屏书库计数 16', txt(q('[data-book-count]')) === '16 本', txt(q('[data-book-count]')))
@@ -93,7 +100,7 @@ const UI_CASES = String.raw`
     checkRoute('/favorites')
     checkActive('收藏的书籍')
     push('收藏页标题正确', txt(q('[data-page-title]')) === '收藏的书籍', txt(q('[data-page-title]')))
-    push('收藏计数 5', txt(q('[data-book-count]')) === '5 本', txt(q('[data-book-count]')))
+    push('收藏计数 5', (await waitForCount('5 本')) === '5 本', txt(q('[data-book-count]')))
 
     // ---------------------------------------------------------------- 3. 我的书架
     await click('[data-nav="shelves"]')
@@ -118,7 +125,7 @@ const UI_CASES = String.raw`
     checkRoute('/shelves/s1')
     checkActive('睡前读物')
     push('书架页标题是书架名', txt(q('[data-page-title]')) === '睡前读物', txt(q('[data-page-title]')))
-    push('书架内含 4 本', txt(q('[data-book-count]')) === '4 本', txt(q('[data-book-count]')))
+    push('书架内含 4 本', (await waitForCount('4 本')) === '4 本', txt(q('[data-book-count]')))
 
     // ---------------------------------------------------------------- 4. 网络小说
     await click('[data-nav="sources"]')
@@ -139,15 +146,15 @@ const UI_CASES = String.raw`
     await click('[data-root-id="r2"]')
     push('面板选择后自动关闭', !q('[data-root-panel]'))
     push('切换器显示新根目录', txt(q('[data-root-label]')) === '移动硬盘', txt(q('[data-root-label]')))
-    push('切到离线目录后列表只剩 4 本', txt(q('[data-book-count]')) === '4 本', txt(q('[data-book-count]')))
+    push('切到离线目录后列表只剩 4 本', (await waitForCount('4 本')) === '4 本', txt(q('[data-book-count]')))
     push('离线根目录出现离线横幅', !!q('[data-offline-hint]'), txt(q('[data-offline-hint]')).slice(0, 40))
     push('离线目录里最近阅读整段隐藏', !q('[data-recent]'))
-    push('收藏计数随根目录收敛为 1', txt(q('[data-fav-count]')) === '1', txt(q('[data-fav-count]')))
+    push('收藏计数随根目录收敛为 1', (await waitFor(() => txt(q('[data-fav-count]')) === '1', 6000)) === true, txt(q('[data-fav-count]')))
 
     await click('[data-library-switcher]')
     await click('[data-root-id="all"]')
     push('切回全部书库后横幅消失', !q('[data-offline-hint]'))
-    push('切回后恢复 16 本', txt(q('[data-book-count]')) === '16 本', txt(q('[data-book-count]')))
+    push('切回后恢复 16 本', (await waitForCount('16 本')) === '16 本', txt(q('[data-book-count]')))
     push('切回后最近阅读回来', !!q('[data-recent]'))
 
     // ---------------------------------------------------------------- 6. 分区折叠

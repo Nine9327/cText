@@ -55,7 +55,26 @@ export const ipcSchemas = {
   'import:pickFolder': z.void(),
   'import:scan': z.object({ path: pathSchema }),
   'import:commit': z.object({ path: pathSchema, options: importOptionsSchema }),
-  'import:cancel': z.object({ taskId: idSchema })
+  'import:cancel': z.object({ taskId: idSchema }),
+
+  // 书籍列表（M1-08）
+  'books:list': z.object({
+    rootId: idSchema.optional(),
+    favoritesOnly: z.boolean().optional(),
+    shelfId: idSchema.optional(),
+    offset: z.number().int().min(0).max(1_000_000),
+    limit: z.number().int().min(1).max(2000)
+  }),
+  'books:count': z.object({
+    rootId: idSchema.optional(),
+    favoritesOnly: z.boolean().optional()
+  }),
+  'books:recent': z.object({
+    rootId: idSchema.optional(),
+    limit: z.number().int().min(1).max(20).optional()
+  }),
+  'shelves:get': z.object({ shelfId: idSchema }),
+  'shelves:list': z.void()
 } satisfies Partial<{ [K in keyof IpcMap]: z.ZodType<IpcMap[K]['input']> }>
 
 /** 有 schema 的通道 = 允许注册 handler 的通道 */

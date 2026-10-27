@@ -2,7 +2,7 @@ import { app, BrowserWindow, screen, session, shell } from 'electron'
 import { join } from 'node:path'
 import { disposePythonBridge, getPythonBridge } from './bridge'
 import { runBridgeSmoke } from './bridge/smoke'
-import { closeDatabase, initDatabase } from './db/connection'
+import { closeDatabase, getDb, initDatabase } from './db/connection'
 import { runDbSmoke } from './db/smoke'
 import { installGlobalErrorHandlers, reportFatal } from './errors/install'
 import { createLogger, initLogging, shutdownLogging } from './log'
@@ -11,6 +11,7 @@ import { registerLogIpc } from './ipc/log'
 import { installIpc } from './ipc/registry'
 import { runIpcSmoke } from './ipc/smoke'
 import { registerRootsIpc } from './ipc/roots'
+import { registerBooksIpc } from './ipc/books'
 import { registerImportIpc } from './ipc/import'
 import { registerSystemIpc } from './ipc/system'
 import { attachWindowStateEvents, registerWindowIpc } from './ipc/window'
@@ -23,6 +24,8 @@ import { runEpubSmoke } from './library/epub-smoke'
 import { runImportSmoke } from './library/import-smoke'
 import { runPackageSmoke } from './package/smoke'
 import { runUiSmoke } from './ui/smoke'
+import { seedUiFixture } from './ui/ui-fixture'
+import { runListSmoke } from './ui/list-smoke'
 import { runImportUiSmoke } from './ui/import-ui-smoke'
 import {
   applyStartupSwitches,
@@ -261,6 +264,7 @@ if (!gotLock) {
     registerSystemIpc()
     registerLogIpc()
     registerRootsIpc()
+    registerBooksIpc()
     registerImportIpc()
     installIpc()
 
@@ -332,9 +336,17 @@ if (!gotLock) {
       return
     }
 
-    // M0-08 自检：侧栏五个入口、选中态唯一性、书库根目录过滤、两个折叠、空页面
+    // M0-08 自检：侧栏五个入口、选中态唯一性、书库根目录过滤、两个折叠、空页面。
+    // M1-08 起列表是真实数据，先往临时库里 seed 确定性 fixture（断言数字与其对齐）
     if (!app.isPackaged && mainWindow && process.env['CTEXT_UI_SMOKE'] === '1') {
+      seedUiFixture(getDb())
       await runUiSmoke(mainWindow)
+      return
+    }
+
+    // M1-08 自检：1 万本压测（接口 P95 / 虚拟 DOM 有界 / 滚动帧率 / 触底分页）
+    if (!app.isPackaged && mainWindow && process.env['CTEXT_LIST_SMOKE'] === '1') {
+      await runListSmoke(mainWindow)
       return
     }
 

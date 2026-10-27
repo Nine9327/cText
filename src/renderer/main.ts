@@ -6,6 +6,7 @@ import { toastFromMain } from './lib/toast'
 import { installRendererErrorHandlers, reportError } from './lib/report'
 import { router } from './router'
 import { useImportStore } from './stores/import'
+import { useLibraryStore } from './stores/library'
 import './styles/index.css'
 
 // M0-06：先装兜底，再 mount。顺序反了的话，挂载期间抛的错就没人接
@@ -31,6 +32,14 @@ app.use(createPinia()).use(router).mount('#app')
 // 用户可以在导入途中关掉面板去做别的事，完成时仍会收到提示。
 try {
   on('import:progress', (dto) => useImportStore().applyProgress(dto))
+} catch {
+  // 浏览器直连模式没有 preload
+}
+
+// M1-08：根目录上下线广播 → 整个书库数据刷新。首次加载由 LibraryView 的
+// 域 watch（immediate）驱动，这里只挂订阅
+try {
+  useLibraryStore().bindEvents()
 } catch {
   // 浏览器直连模式没有 preload
 }

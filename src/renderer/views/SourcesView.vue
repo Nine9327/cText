@@ -10,14 +10,13 @@ import { useRoute } from 'vue-router'
 import AppIcon from '@/components/common/AppIcon.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import { pushToast } from '@/lib/toast'
-import { useLibraryStore } from '@/stores/library'
+import { fixtureSources, type SourceFixture } from '@/fixture/sources'
 
 const route = useRoute()
-const library = useLibraryStore()
 
 const sourceId = computed(() => route.params.sourceId as string | undefined)
-const current = computed(() => library.sourceById(sourceId.value))
-const list = computed(() => (current.value ? [current.value] : library.sources))
+const current = computed(() => fixtureSources.find((source) => source.id === sourceId.value) ?? null)
+const list = computed<SourceFixture[]>(() => (current.value ? [current.value] : fixtureSources))
 
 function importSource(): void {
   pushToast({ level: 'info', message: '导入书源将在 M4-07 提供' })
@@ -30,7 +29,7 @@ function importSource(): void {
       <h1 class="truncate text-[15px] font-medium text-ink">
         {{ current ? current.name : '网络小说' }}
       </h1>
-      <span class="text-[11.5px] text-faint">{{ library.sources.length }} 个书源</span>
+      <span class="text-[11.5px] text-faint">{{ fixtureSources.length }} 个书源</span>
       <button type="button" class="ct-btn ml-auto" data-source-import @click="importSource">
         <AppIcon name="import" :size="14" />
         导入书源

@@ -1,25 +1,33 @@
 <script setup lang="ts">
+/**
+ * 书籍卡片（三种视图共用一套数据）。
+ *
+ * 封面一律用「id 哈希取色」的占位渐变：真实封面要等 M2-03 的自定义协议
+ * （cover_path 只是缓存文件名，没有可用的 URL scheme）。产品文档 §2.4 明确
+ * 无图时就该是取色占位，所以这不是降级而是既定设计。
+ */
 import { computed } from 'vue'
-import type { MockBook } from '@/mock/library'
+import type { BookDTO } from '@shared/dto'
+import { coverGradient } from '@/lib/cover'
 
-const props = withDefaults(defineProps<{ book: MockBook; variant?: 'grid' | 'detail' | 'list' }>(), {
+const props = withDefaults(defineProps<{ book: BookDTO; variant?: 'grid' | 'detail' | 'list' }>(), {
   variant: 'grid'
 })
 
-const isOffline = computed(() => props.book.state === 'offline')
+const isOffline = computed(() => props.book.offline)
 
-const coverStyle = computed(() => ({
-  background: `linear-gradient(155deg, ${props.book.cover.from} 0%, ${props.book.cover.to} 100%)`
-}))
+const coverStyle = computed(() => {
+  const { from, to } = coverGradient(props.book.id)
+  return { background: `linear-gradient(155deg, ${from} 0%, ${to} 100%)` }
+})
 
 const statusText = computed(() => {
-  switch (props.book.state) {
+  if (props.book.offline) return '目录离线'
+  switch (props.book.readState) {
     case 'reading':
       return `已读 ${Math.round(props.book.progress * 100)}%`
     case 'finished':
       return '已读完'
-    case 'offline':
-      return '目录离线'
     default:
       return '未读'
   }
@@ -41,7 +49,7 @@ const statusText = computed(() => {
       <span class="absolute inset-x-0 top-0 line-clamp-2 px-2.5 pt-2.5 text-[10.5px] font-medium leading-[1.35] text-white/90">
         {{ book.title }}
       </span>
-      <span class="absolute inset-x-0 bottom-0 px-2.5 pb-2 text-[9px] text-white/55">{{ book.author }}</span>
+      <span class="absolute inset-x-0 bottom-0 px-2.5 pb-2 text-[9px] text-white/55">{{ book.author ?? '佚名' }}</span>
 
       <span
         v-if="isOffline"
@@ -51,7 +59,7 @@ const statusText = computed(() => {
       </span>
 
       <span
-        v-if="book.state === 'reading'"
+        v-if="book.readState === 'reading' && !book.offline"
         class="absolute inset-x-0 bottom-0 h-[3px] bg-black/40"
       >
         <span class="block h-full bg-accent" :style="{ width: `${book.progress * 100}%` }" />
@@ -78,12 +86,12 @@ const statusText = computed(() => {
     </div>
     <div class="min-w-0 flex-1">
       <p class="line-clamp-2 text-[13px] leading-[1.4] text-ink/90">{{ book.title }}</p>
-      <p class="mt-1 truncate text-[11.5px] text-faint">{{ book.author }}</p>
+      <p class="mt-1 truncate text-[11.5px] text-faint">{{ book.author ?? '佚名' }}</p>
       <div class="mt-2 flex items-center gap-2">
         <span class="text-[11px] text-dim">{{ statusText }}</span>
         <span class="text-[10px] uppercase tracking-wide text-faint">{{ book.format }}</span>
       </div>
-      <div v-if="book.state === 'reading'" class="mt-1.5 h-[2px] w-full rounded-full bg-white/10">
+      <div v-if="book.readState === 'reading' && !book.offline" class="mt-1.5 h-[2px] w-full rounded-full bg-white/10">
         <div class="h-full rounded-full bg-accent" :style="{ width: `${book.progress * 100}%` }" />
       </div>
     </div>
@@ -102,7 +110,7 @@ const statusText = computed(() => {
       <span class="pointer-events-none absolute inset-y-0 left-0 w-[3px] bg-black/25" />
     </div>
     <span class="min-w-0 flex-1 truncate text-[12.5px] text-ink/90">{{ book.title }}</span>
-    <span class="hidden w-32 shrink-0 truncate text-[11.5px] text-faint sm:block">{{ book.author }}</span>
+    <span class="hidden w-32 shrink-0 truncate text-[11.5px] text-faint sm:block">{{ book.author ?? '佚名' }}</span>
     <span class="w-20 shrink-0 text-right text-[11px] text-faint">{{ statusText }}</span>
   </button>
 </template>

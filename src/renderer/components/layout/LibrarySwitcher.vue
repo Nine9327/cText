@@ -101,6 +101,26 @@ onBeforeUnmount(() => {
     >
       <p class="px-2 pb-1 pt-0.5 text-[10.5px] tracking-wider text-faint">书库根目录</p>
 
+      <!-- 「全部书库」是渲染层虚拟入口，不在 roots 表里，所以单独渲染 -->
+      <button
+        type="button"
+        role="option"
+        :aria-selected="store.isAllRoots"
+        class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors duration-120 hover:bg-hover"
+        :class="store.isAllRoots && 'bg-active'"
+        data-root-option
+        data-root-id="all"
+        @click="select('all')"
+      >
+        <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500/80" />
+        <span class="min-w-0 flex-1">
+          <span class="block truncate text-[12.5px] text-ink/90">全部书库</span>
+          <span class="block truncate text-[10.5px] text-faint">所有已登记目录</span>
+        </span>
+        <span class="shrink-0 text-[11px] text-faint">{{ store.totalBookCount }}</span>
+        <AppIcon v-if="store.isAllRoots" name="check" :size="12" class="shrink-0 text-accent" />
+      </button>
+
       <button
         v-for="root in store.roots"
         :key="root.id"
@@ -123,7 +143,7 @@ onBeforeUnmount(() => {
             {{ root.path || '所有已登记目录' }}
           </span>
         </span>
-        <span class="shrink-0 text-[11px] text-faint">{{ store.rootCount(root.id) }}</span>
+        <span class="shrink-0 text-[11px] text-faint">{{ root.bookCount }}</span>
         <AppIcon
           v-if="root.id === store.activeRootId"
           name="check"

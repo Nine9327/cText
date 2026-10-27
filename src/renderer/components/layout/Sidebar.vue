@@ -15,6 +15,7 @@ import LibrarySwitcher from '@/components/layout/LibrarySwitcher.vue'
 import SidebarSection from '@/components/layout/SidebarSection.vue'
 import { pushToast } from '@/lib/toast'
 import { useLibraryStore } from '@/stores/library'
+import { fixtureSources } from '@/fixture/sources'
 import { useUiStore } from '@/stores/ui'
 
 const library = useLibraryStore()
@@ -54,7 +55,7 @@ function createShelf(): void {
         >
           <AppIcon name="star" :size="15" />
           <span class="flex-1 truncate">收藏的书籍</span>
-          <span class="text-[11px] text-faint" data-fav-count>{{ library.favorites.length }}</span>
+          <span class="text-[11px] text-faint" data-fav-count>{{ library.favCount }}</span>
         </RouterLink>
       </nav>
 
@@ -89,7 +90,7 @@ function createShelf(): void {
           >
             <AppIcon name="folder" :size="14" class="text-faint" />
             <span class="flex-1 truncate">{{ shelf.name }}</span>
-            <span class="text-[11px] text-faint">{{ shelf.count }}</span>
+            <span class="text-[11px] text-faint">{{ shelf.bookCount }}</span>
           </RouterLink>
 
           <p v-if="library.shelves.length === 0" class="px-2 py-1 text-[11.5px] text-faint">
@@ -105,7 +106,7 @@ function createShelf(): void {
           @toggle="ui.toggleSection('sources')"
         >
           <RouterLink
-            v-for="source in library.sources"
+            v-for="source in fixtureSources"
             :key="source.id"
             :to="`/sources/${source.id}`"
             class="ct-nav-item"
@@ -119,7 +120,7 @@ function createShelf(): void {
             <span class="flex-1 truncate">{{ source.name }}</span>
           </RouterLink>
 
-          <p v-if="library.sources.length === 0" class="px-2 py-1 text-[11.5px] text-faint">
+          <p v-if="fixtureSources.length === 0" class="px-2 py-1 text-[11.5px] text-faint">
             还没有导入书源
           </p>
         </SidebarSection>

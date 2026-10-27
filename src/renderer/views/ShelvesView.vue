@@ -45,7 +45,7 @@ function createShelf(): void {
             </span>
             <div class="min-w-0 flex-1">
               <p class="truncate text-[13px] text-ink">{{ shelf.name }}</p>
-              <p class="mt-0.5 text-[11px] text-faint">{{ shelf.count }} 本</p>
+              <p class="mt-0.5 text-[11px] text-faint">{{ shelf.bookCount }} 本</p>
             </div>
             <AppIcon
               name="chevron-right"
@@ -55,7 +55,7 @@ function createShelf(): void {
           </div>
 
           <p class="mt-3 line-clamp-1 text-[11.5px] text-faint">
-            {{ shelf.books.slice(0, 3).map((book) => book.title).join(' · ') || '空书架' }}
+            {{ shelf.bookCount > 0 ? '点击查看书架内容' : '空书架' }}
           </p>
         </RouterLink>
       </div>
