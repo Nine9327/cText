@@ -1,5 +1,8 @@
 import Database from 'better-sqlite3'
-import { migrate, type MigrateResult } from './migrations'
+import { ensureCompatibleDatabase, migrate, type MigrateResult } from './migrations'
+import { createLogger } from '../log'
+
+const log = createLogger('db')
 
 export type Db = Database.Database
 
@@ -22,10 +25,15 @@ const PRAGMAS = [
  * 调用方负责生命周期；需要单例时用 initDatabase。
  */
 export function openDatabase(file: string): OpenResult {
+  // 代际校验在建立连接**之前**：连接一旦打开，Windows 上就改不了名
+  const archived = ensureCompatibleDatabase(file)
+  if (archived) {
+    log.warn('检测到与当前版本不符的旧数据文件，已归档并重建', { archived })
+  }
   const db = new Database(file)
   for (const pragma of PRAGMAS) db.pragma(pragma)
   const migration = migrate(db)
-  return { db, migration }
+  return { db, migration: { ...migration, archived } }
 }
 
 let instance: Db | null = null
@@ -35,7 +43,7 @@ let instance: Db | null = null
  */
 export function initDatabase(file: string): OpenResult {
   if (instance) {
-    return { db: instance, migration: { from: 0, to: 0, applied: [] } }
+    return { db: instance, migration: { from: 0, to: 0, applied: [], archived: null } }
   }
   const opened = openDatabase(file)
   instance = opened.db

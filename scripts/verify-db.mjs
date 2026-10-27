@@ -13,7 +13,8 @@
  * 用法：pnpm verify:db
  */
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, statSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
@@ -43,7 +44,10 @@ if (build.status !== 0) {
 
 console.log('[2/2] 数据库断言 ...')
 const exitCode = await new Promise((resolve) => {
-  const child = spawn(electronBin, ['.'], {
+  // 必须用临时 userData：不带的话，用户开着 cText / dev 时单实例锁会让本实例
+  // 静默退出（表现为「无断言输出、退出码 0」）；顺带不再依赖真实书库
+  const scratch = mkdtempSync(join(tmpdir(), 'ctext-db-'))
+  const child = spawn(electronBin, ['.', `--user-data-dir=${join(scratch, 'userData')}`], {
     cwd: root,
     env: { ...cleanEnv, CTEXT_DB_SMOKE: '1' },
     stdio: ['ignore', 'pipe', 'pipe']
@@ -79,11 +83,16 @@ const exitCode = await new Promise((resolve) => {
       record('userData 下已生成库文件', exists && size > 0, `${dbFile} (${size} B)`)
       record('WAL 附属文件已生成', existsSync(`${dbFile}-wal`), `${dbFile}-wal`)
     } else {
-      record('取到真实库路径', false, '未输出 SMOKE DB INFO')
+      record('取到库文件路径', false, '未输出 SMOKE DB INFO')
     }
 
     if (lines.length === 0) {
       record('数据库自检产出结果', false, `退出码 ${code}，无断言输出`)
+    }
+    try {
+      rmSync(scratch, { recursive: true, force: true })
+    } catch {
+      console.log(`  · 临时目录未清理（可手动删）：${scratch}`)
     }
     resolve(code ?? 1)
   })

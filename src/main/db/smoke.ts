@@ -1,8 +1,9 @@
-import { rmSync } from 'node:fs'
+import { existsSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import Database from 'better-sqlite3'
 import { app } from 'electron'
 import { openDatabase } from './connection'
-import { migrate, migrations } from './migrations'
+import { ensureCompatibleDatabase, migrate, migrations } from './migrations'
 
 export interface Check {
   name: string
@@ -128,5 +129,78 @@ export function runDbSmoke(): Check[] {
     removeDbFiles(file)
   }
 
+  // ---------------------------------------------------------------- 异物库防御
+  // 真实事故（2026-10-28）：原型期的库 user_version 恰好是 1，与迁移链最新版本
+  // 撞车，migrate 认为已是最新，一张现役表都没建 → 所有查询报 no such table。
+  // M1 期间全部验收都用全新临时库，这个路径从没被跑到过。
+  {
+    const legacyFile = join(app.getPath('temp'), `ctext-db-smoke-legacy-${Date.now()}.db`)
+    removeDbFiles(legacyFile)
+    const legacy = new Database(legacyFile)
+    legacy.pragma('user_version = 1')
+    legacy.exec('CREATE TABLE novel_books (id TEXT PRIMARY KEY)') // 与现役 schema 毫无关系的旧表
+    legacy.close()
+
+    const reopened = openDatabase(legacyFile)
+    try {
+      check('异物库被识别并归档', typeof reopened.migration.archived === 'string', reopened.migration.archived ?? '未归档')
+      check('归档后重建出现役表', generationTablesReady(reopened.db), 'books/library_roots/chapters/books_fts')
+      check(
+        '原文件保留为归档（数据零丢失）',
+        typeof reopened.migration.archived === 'string' && existsSync(reopened.migration.archived!),
+        reopened.migration.archived ?? '-'
+      )
+      let legacyTables = { c: 0 }
+      if (reopened.migration.archived) {
+        // 必须显式 close：句柄不释放，下面 finally 里的 rmSync 会 EBUSY
+        const archivedDb = new Database(reopened.migration.archived, { readonly: true })
+        try {
+          legacyTables = archivedDb
+            .prepare("SELECT COUNT(*) AS c FROM sqlite_master WHERE type='table' AND name='novel_books'")
+            .get() as { c: number }
+        } finally {
+          archivedDb.close()
+        }
+      }
+      check('归档文件里的旧表原样保留', legacyTables.c === 1, String(legacyTables.c))
+    } finally {
+      reopened.db.close()
+      removeDbFiles(legacyFile)
+      if (reopened.migration.archived) rmSync(reopened.migration.archived, { force: true })
+    }
+  }
+
+  // 来自未来版本的库（用户装了旧版应用）：绝不能打开，更不能动
+  {
+    const futureFile = join(app.getPath('temp'), `ctext-db-smoke-future-${Date.now()}.db`)
+    removeDbFiles(futureFile)
+    const future = new Database(futureFile)
+    future.pragma('user_version = 999')
+    future.exec('CREATE TABLE books (id TEXT PRIMARY KEY)')
+    future.close()
+
+    let rejected = false
+    let detail = ''
+    try {
+      openDatabase(futureFile)
+    } catch (err) {
+      rejected = true
+      detail = err instanceof Error ? err.message : String(err)
+    }
+    check('未来版本的库拒绝打开', rejected, detail.slice(0, 60))
+    check('未来版本的库原样保留', existsSync(futureFile), existsSync(futureFile) ? '未改动' : '被动了')
+    removeDbFiles(futureFile)
+  }
+
+  // 新库路径：文件不存在时是空操作
+  check('新库路径不做代际校验', ensureCompatibleDatabase(join(app.getPath('temp'), `no-such-${Date.now()}.db`)) === null, '-')
+
   return checks
+}
+
+function generationTablesReady(db: import('better-sqlite3').Database): boolean {
+  const tables = new Set(
+    (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map((r) => r.name)
+  )
+  return ['books', 'library_roots', 'chapters', 'books_fts'].every((t) => tables.has(t))
 }
