@@ -305,6 +305,36 @@ export async function runImportUiSmoke(win: BrowserWindow, ctx: ImportUiSmokeCon
       await sleep(200)
       return null
     `)
+
+    // ---------------------------------------------------------------- 9. 粘贴带引号的路径
+    // 资源管理器「复制文件地址」给出 "D:\..."，引号不剥会被 resolve 当相对路径
+    // 拼到应用目录上，报一个莫名其妙的「目录不存在」
+    await run(win, `
+      q('[data-import-trigger]').click()
+      await sleep(200)
+      const input = q('[data-import-path]')
+      input.value = ${JSON.stringify(`"${ctx.booksDir}"`)}
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      await sleep(100)
+      return null
+    `)
+    await run(win, `await click('[data-import-scan]')`)
+    const quoted = (await run(win, `
+      await waitFor(() => q('[data-import-dialog]').getAttribute('data-stage') === 'preview', 20000)
+      return {
+        stage: q('[data-import-dialog]').getAttribute('data-stage'),
+        error: q('[data-import-error]') ? txt(q('[data-import-error]')) : '',
+        target: q('[data-import-target]') ? txt(q('[data-import-target]')) : ''
+      }
+    `)) as { stage: string; error: string; target: string } | null
+
+    check('粘贴带引号的路径也能扫描', quoted?.stage === 'preview', `${quoted?.stage ?? '未进入'} ${quoted?.error ?? ''}`)
+    // 输入框保留用户原样（带引号），剥引号发生在主进程——上面的「扫描成功」即是证据
+    check(
+      '输入框原样保留粘贴内容',
+      quoted?.target === `"${ctx.booksDir}"`,
+      quoted?.target ?? ''
+    )
   } catch (err) {
     check('自检脚本执行', false, err instanceof Error ? err.message : String(err))
   } finally {

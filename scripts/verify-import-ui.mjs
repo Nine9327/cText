@@ -66,7 +66,9 @@ function makeBooksDir() {
 function makeCancelDir() {
   const dir = join(scratch, 'many')
   mkdirSync(dir, { recursive: true })
-  for (let i = 0; i < 60; i += 1) {
+  // 300 本：取消场景要求「导入中」这个窗口足够长。60 本在快机器上几秒就跑完了，
+  // 渲染层 50ms 一次的轮询会直接看到结果页，断言「进度面板可见」就变成碰运气
+  for (let i = 0; i < 300; i += 1) {
     writeFileSync(join(dir, `book-${String(i).padStart(3, '0')}.txt`), bookText(6, `C${i}`), 'utf8')
   }
   return dir

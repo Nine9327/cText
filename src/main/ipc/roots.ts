@@ -20,6 +20,7 @@ import { rootsRepo } from '../db/repositories/roots'
 import { checkAllRoots, matchRelocated, probePath } from '../library/roots-monitor'
 import { startImport } from '../library/import-task'
 import { createLogger } from '../log'
+import { sanitizeInputPath } from '../utils/path'
 import { coversDir } from './import'
 import { registerHandler } from './registry'
 
@@ -47,7 +48,8 @@ function toDTO(root: RootWithCount): RootDTO {
  * 大小写只在查重时折叠（SQLite 的 lower()），存储仍保留用户原样，便于展示。
  */
 function normalizePath(input: string): string {
-  const trimmed = input.trim()
+  // 「复制文件地址」粘贴的路径带引号，不剥掉会被 resolve 当相对路径拼到应用目录
+  const trimmed = sanitizeInputPath(input)
   if (!trimmed) throw new AppError(ERROR_CODES.invalidArgument, '路径不能为空')
   const full = resolve(trimmed)
   if (!isAbsolute(full)) {

@@ -15,6 +15,7 @@ import { AppError, ERROR_CODES } from '@shared/errors'
 import { createLogger } from '../log'
 import { probePath } from '../library/roots-monitor'
 import { buildScanPreview, cancelImport, startImport } from '../library/import-task'
+import { sanitizeInputPath } from '../utils/path'
 import { registerHandler } from './registry'
 
 const log = createLogger('import')
@@ -25,7 +26,8 @@ export function coversDir(): string {
 }
 
 async function assertUsableDirectory(input: string): Promise<string> {
-  const target = resolve(input.trim())
+  // 「复制文件地址」粘贴的路径带引号，不剥掉会被 resolve 当相对路径拼到应用目录
+  const target = resolve(sanitizeInputPath(input))
   if (!(await probePath(target))) {
     throw new AppError(ERROR_CODES.notFound, '目录不存在、不是文件夹，或当前无法访问')
   }
