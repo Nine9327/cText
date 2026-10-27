@@ -51,17 +51,14 @@ record('Node 22', nodeMajor === 22, `v${process.versions.node}`)
 const pnpmVersion = run('pnpm', ['--version'])
 record('pnpm', !!pnpmVersion && /^\d+\./.test(pnpmVersion), pnpmVersion ?? 'not found')
 
-// 3. Python 3.11（文档 §3.1 锁定）
-const pyDetail = (() => {
-  const launcher = run('py', ['-3.11', '--version'])
-  if (launcher) return `py -3.11 → ${launcher}`
-  const uvPath = run('uv', ['python', 'find', '3.11'])
-  if (uvPath && existsSync(uvPath)) {
-    return `uv → ${runExe(uvPath, ['--version']) ?? uvPath}`
-  }
-  return 'not found（建议 uv python install 3.11）'
-})()
-record('Python 3.11', pyDetail.includes('3.11.'), pyDetail)
+// 3. Python 3.11（文档 §3.1 锁定）—— 使用仓库内 .venv，不依赖全局解释器
+const venvPy = join(root, '.venv', 'Scripts', 'python.exe')
+const pyVersion = existsSync(venvPy) ? runExe(venvPy, ['--version']) : null
+record(
+  'Python 3.11 (.venv)',
+  !!pyVersion && /3\.11\./.test(pyVersion),
+  pyVersion ?? '未建立，运行 pnpm setup:python'
+)
 
 // 4. VS Build Tools（C++ 工具链）—— pnpm 严格构建策略要求 node-gyp 能成功
 const vswhere = 'C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe'

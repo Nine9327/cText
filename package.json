@@ -13,6 +13,7 @@
     "check:env": "node scripts/verify-env.mjs",
     "check:env:electron": "node scripts/run-electron-check.mjs",
     "rebuild:native": "electron-rebuild -f -o better-sqlite3 --build-from-source -d https://artifacts.electronjs.org/headers/dist",
+    "setup:python": "node scripts/setup-python.mjs",
     "postinstall": "pnpm rebuild:native"
   },
   "dependencies": {

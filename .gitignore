@@ -12,6 +12,7 @@ release/
 __pycache__/
 *.pyc
 .venv/
+.python/
 python/**/build/
 python/**/dist/
 
