@@ -24,7 +24,7 @@ import re
 
 from paths import SUPPORTED_FORMATS, format_of, require_path  # noqa: F401  (对外仍可 parse_txt.xxx)
 from rpc import ERROR_INVALID_ARGUMENT, WorkerError, method
-from textenc import detect_encoding, is_wide_encoding, normalize_encoding
+from textenc import bom_length, detect_encoding, is_wide_encoding, normalize_encoding
 
 # 中文数字 + 阿拉伯数字。含大写与「〇」「两」这些实际会出现在章节名里的写法
 CN_NUM = "零〇一二三四五六七八九十百千万亿两壹贰叁肆伍陆柒捌玖拾佰仟"
@@ -211,7 +211,12 @@ def _read_head_lines(path: str, encoding: str, bom_len: int, limit: int) -> list
     with open(path, "rb") as f:
         f.seek(bom_len)
         for raw in f:
-            lines.append(raw.decode(encoding, errors="replace").rstrip("\r\n"))
+            line = raw.decode(encoding, errors="replace").rstrip("\r\n")
+            # 调用方显式传 "utf-8" 而文件实际带 BOM 时，首行会多出一个 \ufeff，
+            # 让「书名：」这类字段匹配整体失效。这里兜一层，成本是一次 lstrip
+            if not lines:
+                line = line.lstrip("\ufeff")
+            lines.append(line)
             if len(lines) >= limit:
                 break
     return lines
@@ -309,7 +314,15 @@ def parse_meta(params: dict) -> dict:
 
         return epub_meta(path)
 
-    encoding, bom_len = detect_encoding(path)
+    # 调用方（M1-06 导入队列）通常刚跑过 parse.detect，把结果传进来可以省掉一次探测。
+    # 编码探测要读 16KB 并跑统计模型，500 本书上这笔开销是实打实的。
+    requested = params.get("encoding")
+    if isinstance(requested, str) and requested and requested != "auto":
+        encoding = normalize_encoding(requested)
+        bom_len = bom_length(path)
+    else:
+        encoding, bom_len = detect_encoding(path)
+
     return txt_meta(path, encoding, bom_len)
 
 

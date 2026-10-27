@@ -25,6 +25,13 @@ export interface ExistingBook {
   title: string
   rootId: string | null
   relPath: string | null
+  /**
+   * 已有记录的内容指纹。
+   *
+   * 导入侧靠它区分「同路径但内容变了」与「同路径且内容没变」——
+   * 后者不该重新解析一遍，否则每次点「重新导入」都要把整库重跑一次。
+   */
+  fileHash: string | null
 }
 
 export interface DedupeEntry {
@@ -79,6 +86,7 @@ interface BookRow {
   title: string
   root_id: string | null
   rel_path: string | null
+  file_hash: string | null
 }
 
 /** 按指纹查已有记录（跨根，全局） */
@@ -97,7 +105,13 @@ function findByHashes(db: Db, hashes: readonly string[]): Map<string, ExistingBo
     for (const row of rows) {
       // 唯一索引只约束 local 类型，理论上不会同 hash 多条；真出现时保留先查到的那条
       if (!found.has(row.file_hash)) {
-        found.set(row.file_hash, { id: row.id, title: row.title, rootId: row.root_id, relPath: row.rel_path })
+        found.set(row.file_hash, {
+          id: row.id,
+          title: row.title,
+          rootId: row.root_id,
+          relPath: row.rel_path,
+          fileHash: row.file_hash
+        })
       }
     }
   }
@@ -112,13 +126,21 @@ function findByPaths(db: Db, rootId: string, relPaths: readonly string[]): Map<s
   for (const batch of chunk(relPaths, QUERY_BATCH)) {
     const rows = db
       .prepare(
-        `SELECT id, title, root_id, rel_path FROM books
+        `SELECT id, title, root_id, rel_path, file_hash FROM books
          WHERE root_id = ? AND deleted_at IS NULL AND rel_path IN (${placeholders(batch.length)})`
       )
       .all(rootId, ...batch) as BookRow[]
 
     for (const row of rows) {
-      if (row.rel_path) found.set(row.rel_path, { id: row.id, title: row.title, rootId: row.root_id, relPath: row.rel_path })
+      if (row.rel_path) {
+        found.set(row.rel_path, {
+          id: row.id,
+          title: row.title,
+          rootId: row.root_id,
+          relPath: row.rel_path,
+          fileHash: row.file_hash
+        })
+      }
     }
   }
   return found

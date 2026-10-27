@@ -56,6 +56,7 @@ uv pip install -r python/ctext_worker/requirements.txt --python .venv/Scripts/py
 | `pnpm verify:dedupe` | M1-03 指纹去重验收（指纹一致性、已知盲区、四类重复分流、跨根去重、批量查询） |
 | `pnpm verify:txt` | M1-04 TXT 解析验收（20 个编码样本识别率、章节分级、元数据、bridge 链路） |
 | `pnpm verify:epub` | M1-05 EPUB 解析验收（26 个结构样本的目录层级、封面提取率、DRM/损坏识别、bridge 链路） |
+| `pnpm verify:import` | M1-06 导入队列验收（预览分类、首次/重复导入、覆盖、失败隔离、取消一致性、子目录归属） |
 | `pnpm verify:package` | M0-07 打包验收（构建 → 解包目录 → 真跑一次自检）；加 `--installer` 连安装/卸载一起验 |
 | `pnpm build:worker` | 用 PyInstaller 把 Python worker 打成 `resources/python/ctext-worker/` |
 | `pnpm check:env` / `pnpm check:env:electron` | 环境自检 |
@@ -250,6 +251,25 @@ dedupeFiles(rootId, files, { db })  // → { entries, unique, duplicates, stats 
 - 失败统一报 `E_PARSE_FAILED`（`文件解析失败，可能已损坏或加密`），不与 `E_IO` / `E_INVALID_ARGUMENT` 混用。
 
 验收 `pnpm verify:epub` 分三段：构建 → `python/smoke_epub.py --emit <dir>`（26 个按结构生成的样本，82 项断言，封面提取率 5/5）→ `epub-smoke.ts` 走真实链路（25 项，含封面跨进程落盘与错误码透传），共 **107/107**。样本生成器是 `python/make_epub.py`，按结构参数化，需要新的 EPUB 变体时加一条用例即可。
+
+## 导入任务队列（M1-06）
+
+一次导入的完整生命周期：**解析目标根目录 → 扫描 → 去重 → 逐本解析 → 分批落库**。四件事必须同时成立：
+
+1. **单本失败不中断**。一本加密 EPUB 不能让 500 本导入整体失败。
+2. **每本书是原子的**。书行与它的章节行在同一个事务里，否则取消/崩溃会留下一本没有目录的书——阅读器点进去就是空白，比导入失败更难排查。
+3. **事务粒度是一批 50 本**。逐本提交在 WAL 下每本一次 fsync，500 本要多花十几秒；整批提交则内存与回滚代价过高。**整批失败时退化成逐本写入**，既保住其余 49 本又能定位坏的那本。
+4. **取消要留干净的中间态**。取消后不再取新任务，在途的几本跑完，缓冲区一次性落库——已入库的每本都完整，且不浪费已完成的解析。
+
+几个容易搞错的点：
+
+- **`onDuplicate: 'overwrite'` 只在内容真的变了时才覆盖**，判定靠 `file_hash` 比对。否则「重新导入」会把整库重解析一遍，而用户只是想补进新增的那几本。
+- **扫描器新增 `relBase`**：导入根目录下的子目录时扫描从子目录开始（更省），但 `rel_path` 仍相对根目录。否则同一个文件会以两种 `rel_path` 入库两次。
+- **忽略正则在 `startImport` 里同步校验**。放在异步任务里会先返回 `taskId` 再异步失败，UI 拿到的是一个永远不动的任务。
+- **`parse.detect` 只探测一次编码**，结果传给 `parse.meta` / `parse.txt.outline`（M1-04 遗留，本节点闭环）。EPUB 的 `parse.detect` 直接回 `encoding: null`。
+- `import:commit` 只返回 `taskId`，进度全部走 `import:progress` 事件。
+
+验收 `pnpm verify:import` 分三段：构建 → 生成 EPUB 样本（复用 M1-05 的 `smoke_epub.py --emit`）→ `import-smoke.ts` 在真实主进程里跑（独立临时库 + 临时目录，不碰真实书库），共 **60/60**，覆盖预览分类、首次/重复导入、overwrite 覆盖、单本失败隔离、60 本中途取消的数据一致性、子目录归属与参数校验。
 
 ## 界面骨架（M0-08）
 

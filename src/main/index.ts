@@ -11,6 +11,7 @@ import { registerLogIpc } from './ipc/log'
 import { installIpc } from './ipc/registry'
 import { runIpcSmoke } from './ipc/smoke'
 import { registerRootsIpc } from './ipc/roots'
+import { registerImportIpc } from './ipc/import'
 import { registerSystemIpc } from './ipc/system'
 import { attachWindowStateEvents, registerWindowIpc } from './ipc/window'
 import { installRootsMonitor, stopRootsMonitor } from './library/roots-monitor'
@@ -19,6 +20,7 @@ import { runScannerSmoke } from './library/scanner-smoke'
 import { runDedupeSmoke } from './library/dedupe-smoke'
 import { runParseBridgeSmoke } from './library/parse-bridge-smoke'
 import { runEpubSmoke } from './library/epub-smoke'
+import { runImportSmoke } from './library/import-smoke'
 import { runPackageSmoke } from './package/smoke'
 import { runUiSmoke } from './ui/smoke'
 import {
@@ -258,6 +260,7 @@ if (!gotLock) {
     registerSystemIpc()
     registerLogIpc()
     registerRootsIpc()
+    registerImportIpc()
     installIpc()
 
     // M0-03：数据库在窗口创建之前初始化，失败则不进入界面
@@ -370,6 +373,20 @@ if (!gotLock) {
       }
       const failed = checks.filter((c) => !c.ok).length
       console.log(`SMOKE EPUBCHAIN SUMMARY ${checks.length - failed}/${checks.length}`)
+      await disposePythonBridge()
+      app.exit(failed === 0 ? 0 : 1)
+      return
+    }
+
+    // M1-06 自检：导入任务队列（预览分类 / 首次导入 / 重复 / 覆盖 / 失败隔离 / 取消一致性）。
+    // 用独立临时库 + 临时目录，不碰真实书库；EPUB 样本由 verify-import.mjs 预先铺好
+    if (!app.isPackaged && process.env['CTEXT_IMPORT_SMOKE'] === '1') {
+      const checks = await runImportSmoke()
+      for (const c of checks) {
+        console.log(`SMOKE IMPORT ${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.detail ? ` (${c.detail})` : ''}`)
+      }
+      const failed = checks.filter((c) => !c.ok).length
+      console.log(`SMOKE IMPORT SUMMARY ${checks.length - failed}/${checks.length}`)
       await disposePythonBridge()
       app.exit(failed === 0 ? 0 : 1)
       return

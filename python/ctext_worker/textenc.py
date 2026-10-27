@@ -194,6 +194,7 @@ def detect_encoding(path: str) -> tuple[str, int]:
     返回 `(encoding, bom_length)`。`bom_length` 供上层在计算字节偏移时跳过 BOM，
     否则第一章的 offset 会偏 3 个字节，切出来的正文开头带个不可见字符。
     """
+
     with open(path, "rb") as f:
         head = f.read(4)
         for bom, encoding in BOM_TABLE:
@@ -203,6 +204,23 @@ def detect_encoding(path: str) -> tuple[str, int]:
         sample = f.read(SAMPLE_SIZE)
 
     return detect_from_bytes(sample), 0
+
+
+def bom_length(path: str) -> int:
+    """只按文件头判断 BOM 长度。
+
+    给「调用方已经探测过编码、只想复用结果」的场景用（M1-06 的导入队列会
+    在每本书开始时探测一次，后续调用直接传 encoding）。不再重复跑统计模型。
+    """
+    try:
+        with open(path, "rb") as f:
+            head = f.read(4)
+    except OSError:
+        return 0
+    for bom, _encoding in BOM_TABLE:
+        if head.startswith(bom):
+            return len(bom)
+    return 0
 
 
 def is_wide_encoding(encoding: str) -> bool:

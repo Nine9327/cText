@@ -125,7 +125,7 @@ export interface ShelfDTO {
 
 // ---------------------------------------------------------------- 导入
 
-export type ScanItemStatus = 'new' | 'duplicate' | 'unsupported'
+export type ScanItemStatus = 'new' | 'duplicate' | 'unsupported' | 'empty' | 'failed'
 
 export interface ScanPreviewItemDTO {
   /** 相对扫描根目录的路径 */
@@ -144,8 +144,11 @@ export interface ScanPreviewDTO {
   path: string
   /** 扫描耗时（ms），用于告知用户大目录的代价 */
   elapsedMs: number
+  /** 命中总数（可能大于 items.length，见 truncated） */
   total: number
   items: ScanPreviewItemDTO[]
+  /** items 是否被截断（超大目录只为预览列前 N 条，导入仍会处理全部） */
+  truncated: boolean
 }
 
 export interface ImportOptions {
@@ -163,6 +166,12 @@ export interface ImportOptions {
 
 export type ImportPhase = 'scan' | 'parse' | 'commit' | 'done' | 'cancelled' | 'failed'
 
+/** 单本导入失败。`relPath` 可直接复制给用户，`reason` 不含绝对路径（脱敏） */
+export interface ImportFailureDTO {
+  relPath: string
+  reason: string
+}
+
 export interface ImportProgressDTO {
   taskId: string
   phase: ImportPhase
@@ -171,7 +180,16 @@ export interface ImportProgressDTO {
   total: number
   /** 当前正在处理的文件（相对路径） */
   currentPath: string | null
-  failures: { relPath: string; reason: string }[]
+  /** 失败清单明细。**可能被截断**，真实总数以 `failedTotal` 为准 */
+  failures: ImportFailureDTO[]
+  /** 失败总数（不受 failures 截断影响） */
+  failedTotal: number
+  /** 新增入库数 */
+  imported: number
+  /** 覆盖已有记录数（`onDuplicate: 'overwrite'` 时可能大于 0） */
+  updated: number
+  /** 跳过的重复 / 空文件数 */
+  skipped: number
 }
 
 // ---------------------------------------------------------------- 阅读

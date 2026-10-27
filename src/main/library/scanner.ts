@@ -55,6 +55,13 @@ export interface ScanOptions {
   maxFiles?: number
   /** 并发目录数 */
   concurrency?: number
+  /**
+   * 计算 relPath 的基准目录，默认等于 `root`。
+   *
+   * 用于「导入已登记根目录下的某个子目录」：扫描从子目录开始（更省），
+   * 但 rel_path 必须相对根目录，否则同一个文件会以不同 rel_path 入库两次。
+   */
+  relBase?: string
   /** 取消信号（M1-06 的任务取消要用） */
   signal?: AbortSignal
   /** 每发现一个文件回调一次，用于进度展示 */
@@ -130,6 +137,7 @@ export async function scanDirectory(root: string, options: ScanOptions = {}): Pr
   const extensions = new Set((options.extensions ?? DEFAULT_EXTENSIONS).map((e) => e.toLowerCase()))
   const ignore = compileIgnore(options.ignore ?? DEFAULT_IGNORE)
   const signal = options.signal
+  const relBase = options.relBase ?? root
 
   const files: ScannedFile[] = []
   const stats: ScanStats = {
@@ -188,13 +196,17 @@ export async function scanDirectory(root: string, options: ScanOptions = {}): Pr
         }
 
         const relPath = item.relPath ? `${item.relPath}/${entry.name}` : entry.name
+        const absPath = join(item.absPath, entry.name)
+        // 落库用的相对路径以 relBase 为准；relBase === root 时与 relPath 完全相同，
+        // 只有「从根目录的某个子目录开始扫」时两者才不同
+        const storedRel = relBase === root ? relPath : toPOSIX(relative(relBase, absPath))
 
         if (entry.isSymbolicLink()) {
           stats.skippedSymlink++
           continue
         }
 
-        if (ignore.some((re) => re.test(relPath))) {
+        if (ignore.some((re) => re.test(relPath) || (storedRel !== relPath && re.test(storedRel)))) {
           stats.skippedIgnored++
           continue
         }
@@ -204,7 +216,7 @@ export async function scanDirectory(root: string, options: ScanOptions = {}): Pr
             stats.skippedDepth++
             continue
           }
-          queue.push({ absPath: join(item.absPath, entry.name), relPath, depth: item.depth + 1 })
+          queue.push({ absPath, relPath, depth: item.depth + 1 })
           continue
         }
 
@@ -219,10 +231,10 @@ export async function scanDirectory(root: string, options: ScanOptions = {}): Pr
         // 用 Dirent 拿不到 size/mtime，必须额外 stat。这一步是扫描里最贵的部分，
         // 但 M1-03 的指纹要用 size 做前置判断，省不掉。
         try {
-          const info = await stat(join(item.absPath, entry.name))
+          const info = await stat(absPath)
           const file: ScannedFile = {
-            relPath,
-            absPath: join(item.absPath, entry.name),
+            relPath: storedRel,
+            absPath,
             size: info.size,
             mtimeMs: info.mtimeMs
           }
@@ -231,7 +243,7 @@ export async function scanDirectory(root: string, options: ScanOptions = {}): Pr
           options.onFile?.(file)
         } catch (err) {
           stats.unreadable.push({
-            relPath,
+            relPath: storedRel,
             message: err instanceof Error ? err.message : String(err)
           })
         }

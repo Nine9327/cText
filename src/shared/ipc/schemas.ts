@@ -23,6 +23,20 @@ export const echoRequestSchema = z.object({
   failMode: z.enum(['none', 'throw']).optional()
 })
 
+/**
+ * 导入选项（M1-06）。每一项都有默认值，渲染层传 `{}` 即为「按默认方式导入」。
+ *
+ * `ignorePattern` 限长 500：它会被编译成正则并作用于每个路径，
+ * 太长或含灾难性回溯的表达式会让扫描卡死，长度限制是第一道闸。
+ */
+export const importOptionsSchema = z.object({
+  rootId: idSchema.optional(),
+  registerAsRoot: z.boolean().optional(),
+  scanDepth: z.number().int().min(1).max(32).optional(),
+  ignorePattern: z.string().max(500, '忽略规则最多 500 字符').optional(),
+  onDuplicate: z.enum(['skip', 'overwrite']).optional()
+})
+
 export const ipcSchemas = {
   'system:echo': echoRequestSchema,
   'system:info': z.void(),
@@ -35,7 +49,13 @@ export const ipcSchemas = {
   'roots:add': z.object({ path: pathSchema, scanNow: z.boolean() }),
   'roots:check': z.void(),
   'roots:relocate': z.object({ rootId: idSchema, newPath: pathSchema }),
-  'roots:remove': z.object({ rootId: idSchema })
+  'roots:remove': z.object({ rootId: idSchema }),
+
+  // 导入（M1-06）
+  'import:pickFolder': z.void(),
+  'import:scan': z.object({ path: pathSchema }),
+  'import:commit': z.object({ path: pathSchema, options: importOptionsSchema }),
+  'import:cancel': z.object({ taskId: idSchema })
 } satisfies Partial<{ [K in keyof IpcMap]: z.ZodType<IpcMap[K]['input']> }>
 
 /** 有 schema 的通道 = 允许注册 handler 的通道 */
