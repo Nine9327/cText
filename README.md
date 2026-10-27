@@ -178,7 +178,7 @@ docs/                  产品文档 / 开发计划 / MVP 范围
 
 - **Python 产物必须在 asar 外面**。asar 里的 `.exe` 无法执行，所以 PyInstaller 的 `--onedir` 产物走 `extraResources` 落到 `resources/python/ctext-worker/`，运行时按 `process.resourcesPath` 拼接（`src/main/bridge/launch.ts`）。
 - **userData 固定在 `%APPDATA%\ctext`**：来自 `package.json` 的 `name`，不是 `electron-builder.yml` 的 `productName`。开发态与安装版共用同一目录，因此没有历史数据迁移；卸载也不会删它（`deleteAppDataOnUninstall: false`）。
-- **不做代码签名**：首次运行会有 SmartScreen 提示（M5-03 再评估证书）。
+- **不做代码签名（D5 已定）**：首次运行会有 SmartScreen 提示，属预期；用发布页 SHA256 + 图文指引对冲，W19 视内测安装放弃率再评估证书。
 - **二进制下载走 npmmirror**：electron / NSIS / winCodeSign 的官方源在本机会 502，`scripts/builder-env.mjs` 统一注入镜像；想走官方源用 `CTEXT_NO_MIRROR=1 pnpm dist`。
 - 改了 Python 代码要先 `pnpm build:worker`（`pnpm verify:package` 会在产物缺失时自动构建）。
 
