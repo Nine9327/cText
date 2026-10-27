@@ -4,6 +4,21 @@ import { join } from 'node:path'
 const isDev = !app.isPackaged
 
 /**
+ * 本机同时存在 MuMu / GameViewer 等虚拟显示适配器，Chromium 的 GPU 进程在
+ * GPU 沙箱下会以 0xC0000005 反复崩溃，最终 FATAL 拖死主进程（表现为窗口一闪即退）。
+ * 开发态关闭 GPU 沙箱规避；生产包的策略留给 M0-07 打包时定。
+ */
+if (isDev) app.commandLine.appendSwitch('disable-gpu-sandbox')
+
+/**
+ * 极端情况下的兜底：设 CTEXT_DISABLE_GPU=1 强制软件渲染。
+ * 必须在 app ready 之前调用。
+ */
+if (process.env['CTEXT_DISABLE_GPU'] === '1') {
+  app.disableHardwareAcceleration()
+}
+
+/**
  * 生产环境 CSP：渲染层不允许联网，外网请求一律走主进程。
  * 开发环境不加，否则 Vite HMR 的 ws 与内联样式会被拦。
  */

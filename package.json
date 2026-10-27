@@ -5,10 +5,11 @@
   "description": "cText - 本地优先的 Windows 桌面小说阅读器",
   "main": "./out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
+    "dev": "node scripts/dev.mjs",
+    "dev:raw": "electron-vite dev",
     "dev:web": "vite --config vite.web.config.ts",
     "build": "electron-vite build",
-    "start": "electron-vite preview",
+    "start": "node scripts/dev.mjs preview",
     "typecheck": "vue-tsc --noEmit -p tsconfig.web.json",
     "check:env": "node scripts/verify-env.mjs",
     "check:env:electron": "node scripts/run-electron-check.mjs",
