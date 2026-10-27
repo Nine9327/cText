@@ -34,7 +34,8 @@
     "verify:dedupe": "node scripts/verify-dedupe.mjs",
     "verify:txt": "node scripts/verify-txt.mjs",
     "verify:epub": "node scripts/verify-epub.mjs",
-    "verify:import": "node scripts/verify-import.mjs"
+    "verify:import": "node scripts/verify-import.mjs",
+    "verify:import:ui": "node scripts/verify-import-ui.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

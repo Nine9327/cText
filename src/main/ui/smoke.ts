@@ -99,11 +99,19 @@ const UI_CASES = String.raw`
     await click('[data-nav="shelves"]')
     checkRoute('/shelves')
     checkActive('我的书架')
-    const sectionColor = (() => {
+    // 颜色有 120ms 过渡，直接读会拿到中间插值（表现为偶发失败）。
+    // 等它收敛到终点色再断言，语义不变：**最终**要提亮到正文色
+    const sectionColor = await waitFor(() => {
       const el = q('.ct-section-active')
-      return el ? getComputedStyle(el).color : ''
-    })()
-    push('分区首页选中态提亮到正文色', sectionColor === 'rgb(231, 233, 236)', sectionColor || '没有 .ct-section-active')
+      if (!el) return null
+      const color = getComputedStyle(el).color
+      return color === 'rgb(231, 233, 236)' ? color : null
+    }, 2000)
+    push(
+      '分区首页选中态提亮到正文色',
+      sectionColor === 'rgb(231, 233, 236)',
+      sectionColor || '未收敛到正文色（可能没有 .ct-section-active）'
+    )
     push('书架总览渲染 2 个书架', qa('[data-shelf-card]').length === 2, qa('[data-shelf-card]').length + ' 个')
 
     await click('[data-shelf-item]')

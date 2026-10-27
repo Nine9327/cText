@@ -10,7 +10,7 @@
  * 类型上通过一次断言把「逐通道泛型」贴到运行时的白名单函数上，
  * 调用方写错通道名或有放入参都会在编译期报错。
  */
-import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import { ERROR_CODES, type IpcResult } from '@shared/errors'
 import { EVENT_CHANNEL_SET, INVOKE_CHANNEL_SET, SEND_CHANNEL_SET } from '@shared/ipc/channels'
 import type {
@@ -75,7 +75,22 @@ const on = onRaw as <K extends IpcEventChannel>(
   callback: (payload: IpcEvents[K]) => void
 ) => () => void
 
-const api = { invoke, send, on }
+/**
+ * 拖放进来的 File 取真实磁盘路径。
+ *
+ * `File.path` 自 Electron 29 起废弃（且会在控制台刷警告），官方替代是
+ * `webUtils.getPathForFile`。它必须在 preload 里调——渲染层拿不到 webUtils，
+ * 也拿不到任何 node 能力。
+ *
+ * 只接收 File 实例，不接受任意字符串：这个口子一旦能传路径，就等于给渲染层
+ * 开了一个「任意路径」通道，越过了 IPC 白名单。
+ */
+function getFilePath(file: File): string {
+  if (typeof file !== 'object' || file === null) return ''
+  return webUtils.getPathForFile(file)
+}
+
+const api = { invoke, send, on, getFilePath }
 
 contextBridge.exposeInMainWorld('api', api)
 

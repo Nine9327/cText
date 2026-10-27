@@ -2,6 +2,8 @@
 import ToastHost from '@/components/common/ToastHost.vue'
 import TitleBar from '@/components/layout/TitleBar.vue'
 import Sidebar from '@/components/layout/Sidebar.vue'
+import DropOverlay from '@/components/import/DropOverlay.vue'
+import ImportDialog from '@/components/import/ImportDialog.vue'
 </script>
 
 <template>
@@ -13,6 +15,9 @@ import Sidebar from '@/components/layout/Sidebar.vue'
         <RouterView />
       </main>
     </div>
+    <!-- 两者都在最外层：拖放要覆盖整个窗口（含标题栏），面板要盖在所有内容之上 -->
+    <DropOverlay />
+    <ImportDialog />
     <ToastHost />
   </div>
 </template>

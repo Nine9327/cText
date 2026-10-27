@@ -14,10 +14,12 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import SegmentedControl from '@/components/common/SegmentedControl.vue'
 import BookCard from '@/components/book/BookCard.vue'
 import { pushToast } from '@/lib/toast'
+import { useImportStore } from '@/stores/import'
 import { useLibraryStore } from '@/stores/library'
 
 const route = useRoute()
 const library = useLibraryStore()
+const imports = useImportStore()
 
 const viewMode = ref<'grid' | 'detail' | 'list'>('grid')
 
@@ -65,7 +67,7 @@ const emptyState = computed(() => {
 })
 
 function importBooks(): void {
-  pushToast({ level: 'info', message: '导入书籍将在 M1-06 提供' })
+  imports.open()
 }
 
 function relocateRoot(): void {
@@ -146,7 +148,7 @@ function relocateRoot(): void {
           </button>
 
           <div class="flex">
-            <button class="ct-btn rounded-r-none" title="导入（M1 实现）" @click="importBooks">
+            <button class="ct-btn rounded-r-none" title="导入书籍" data-import-trigger @click="importBooks">
               <AppIcon name="import" :size="14" />
               导入书籍文件
             </button>
@@ -181,7 +183,13 @@ function relocateRoot(): void {
       <!-- 空状态 -->
       <EmptyState v-else :icon="emptyState.icon" :title="emptyState.title" :desc="emptyState.desc">
         <RouterLink v-if="shelfMissing" to="/shelves" class="ct-btn">返回书架列表</RouterLink>
-        <button v-else-if="!isFavorites && !isShelf" type="button" class="ct-btn" @click="importBooks">
+        <button
+          v-else-if="!isFavorites && !isShelf"
+          type="button"
+          class="ct-btn"
+          data-import-trigger
+          @click="importBooks"
+        >
           <AppIcon name="import" :size="14" />
           导入书籍文件
         </button>

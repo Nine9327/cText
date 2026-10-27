@@ -23,6 +23,7 @@ import { runEpubSmoke } from './library/epub-smoke'
 import { runImportSmoke } from './library/import-smoke'
 import { runPackageSmoke } from './package/smoke'
 import { runUiSmoke } from './ui/smoke'
+import { runImportUiSmoke } from './ui/import-ui-smoke'
 import {
   applyStartupSwitches,
   installBootWatchdog,
@@ -334,6 +335,21 @@ if (!gotLock) {
     // M0-08 自检：侧栏五个入口、选中态唯一性、书库根目录过滤、两个折叠、空页面
     if (!app.isPackaged && mainWindow && process.env['CTEXT_UI_SMOKE'] === '1') {
       await runUiSmoke(mainWindow)
+      return
+    }
+
+    // M1-07 自检：导入交互（真实拖放 → 预览分类 → 导入 → 结果 → 重复不脏 → 取消）。
+    // 必须用 --user-data-dir=<临时目录>；样本目录由 verify-import-ui.mjs 建好传入
+    if (!app.isPackaged && mainWindow && process.env['CTEXT_IMPORT_UI_SMOKE'] === '1') {
+      const booksDir = process.env['CTEXT_IMPORT_UI_DIR']
+      const cancelDir = process.env['CTEXT_IMPORT_UI_CANCEL_DIR']
+      if (!booksDir || !cancelDir) {
+        console.log('SMOKE IMPORTUI FAIL 缺少 CTEXT_IMPORT_UI_DIR / CTEXT_IMPORT_UI_CANCEL_DIR')
+        await disposePythonBridge()
+        app.exit(1)
+        return
+      }
+      await runImportUiSmoke(mainWindow, { booksDir, cancelDir })
       return
     }
 

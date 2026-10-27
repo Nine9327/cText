@@ -57,6 +57,7 @@ uv pip install -r python/ctext_worker/requirements.txt --python .venv/Scripts/py
 | `pnpm verify:txt` | M1-04 TXT 解析验收（20 个编码样本识别率、章节分级、元数据、bridge 链路） |
 | `pnpm verify:epub` | M1-05 EPUB 解析验收（26 个结构样本的目录层级、封面提取率、DRM/损坏识别、bridge 链路） |
 | `pnpm verify:import` | M1-06 导入队列验收（预览分类、首次/重复导入、覆盖、失败隔离、取消一致性、子目录归属） |
+| `pnpm verify:import:ui` | M1-07 导入交互验收（真实拖放 → 预览分类 → 导入 → 结果 → 重复不脏 → 取消） |
 | `pnpm verify:package` | M0-07 打包验收（构建 → 解包目录 → 真跑一次自检）；加 `--installer` 连安装/卸载一起验 |
 | `pnpm build:worker` | 用 PyInstaller 把 Python worker 打成 `resources/python/ctext-worker/` |
 | `pnpm check:env` / `pnpm check:env:electron` | 环境自检 |
@@ -270,6 +271,22 @@ dedupeFiles(rootId, files, { db })  // → { entries, unique, duplicates, stats 
 - `import:commit` 只返回 `taskId`，进度全部走 `import:progress` 事件。
 
 验收 `pnpm verify:import` 分三段：构建 → 生成 EPUB 样本（复用 M1-05 的 `smoke_epub.py --emit`）→ `import-smoke.ts` 在真实主进程里跑（独立临时库 + 临时目录，不碰真实书库），共 **60/60**，覆盖预览分类、首次/重复导入、overwrite 覆盖、单本失败隔离、60 本中途取消的数据一致性、子目录归属与参数校验。
+
+## 导入交互（M1-07）
+
+四段式面板：**选目录 → 预览分类 → 导入中 → 结果**。入口有三个：工具栏按钮、空状态按钮、拖放。
+
+几个容易做错的点：
+
+- **预览必须能扫未登记的目录**。产品文档 §2.4 的「是否同时登记为根目录」是在**导入时**才问的，而预览在导入之前。实现上给 `resolveImportTarget` 加了 `mode.allowUnregistered`（预览专用），未登记时 `rootId` 返回空串；登记仍然只发生在导入时。
+- **`dragleave` 的处理器不能判断「是否拖的是文件」**——该事件的 `dataTransfer` 常常是空的，加了判断就永远退不出高亮态。另外兜一层 `dragend`（按 Esc 取消拖放时不一定有 dragleave）。
+- **`File.path` 已废弃**，改用 `webUtils.getPathForFile`，只能在 preload 里调，所以 preload 新增 `getFilePath(file)`。只接受 File 实例，不接受路径字符串。
+- **目录与文件靠 `webkitGetAsEntry().isDirectory` 区分**；拿不到 entry 时退回「没有扩展名就当目录」。拖进来的文件会定位到所在文件夹，并在面板顶部如实说明（单文件导入尚未实现，不能假装只导入了那几个文件）。
+- **关闭面板不取消任务**。误关面板不该丢掉一次几十秒的导入；进度订阅挂在应用生命周期上，关掉面板也能收到完成提示。
+- **预览把坏 EPUB 算进「新增」，导入时才落到失败清单**。预览只算指纹不做解析，无法预知解析失败。副作用是失败项天然可重试。
+- **「不支持」与「跳过」是两个页签**：PDF 是格式不要，空文件是没内容，混在一起会误导。
+
+验收 `pnpm verify:import:ui` 分三段：构建 → 造两个样本目录 → `import-ui-smoke.ts` 在真实窗口里跑，**30/30**。拖放用 CDP 的 `Input.dispatchDragEvent` 派发真实拖放事件（合成 DOM 事件拿不到磁盘路径，`webUtils.getPathForFile` 会抛，等于没测拖放）；CDP 没有 `dragLeave` 类型，「拖出窗口」这一支改为直接派发 `dragleave` 验证。
 
 ## 界面骨架（M0-08）
 

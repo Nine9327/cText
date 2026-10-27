@@ -168,6 +168,12 @@ function pruneFinished(): void {
 // ---------------------------------------------------------------- 目标解析
 
 export interface ImportTarget {
+  /**
+   * 所属根目录。**空串表示「还没登记」**——只有预览会走到这个值。
+   *
+   * 用空串而不是 null 是为了让调用方不必到处判空：`dedupeFiles('')` 查不到任何
+   * 同路径记录，语义正好是「这个目录从没导入过，不可能有同路径的书」。
+   */
   rootId: string
   rootPath: string
   /** 实际开始扫描的目录（通常是 rootPath，也可能是 root 下的子目录） */
@@ -176,16 +182,33 @@ export interface ImportTarget {
   relBase: string
 }
 
+export interface ResolveMode {
+  /**
+   * 允许「不属于任何根目录」的目录，此时 rootId 返回空串。
+   *
+   * 预览必须开这个开关：产品文档 §2.4 的「是否同时登记为根目录」是在**导入时**
+   * 才问的，而预览发生在导入之前。不开的话用户拖进来一个没登记过的目录，
+   * 连「里面有几本书」都看不到——而那恰恰是最需要预览的场景。
+   */
+  allowUnregistered?: boolean
+}
+
 /**
  * 确定「这次导入属于哪个根目录」。
  *
- * 三条规则，顺序不能乱：
+ * 四条规则，顺序不能乱：
  *   1. 与已登记根目录路径完全一致 → 直接用
  *   2. 是某个已登记根目录的**子目录** → 用它，并把 rel_path 相对根目录计算
  *      （否则同一个文件会以两种 rel_path 入库两次）
- *   3. 都不是 → 按需登记成新根目录
+ *   3. 都不是，且 `registerAsRoot: false` → 报错，让调用方去提示用户
+ *   4. 都不是 → 登记成新根目录（导入），或返回空 rootId（预览）
  */
-export function resolveImportTarget(input: string, options: ImportOptions, db: Db): ImportTarget {
+export function resolveImportTarget(
+  input: string,
+  options: ImportOptions,
+  db: Db,
+  mode: ResolveMode = {}
+): ImportTarget {
   const target = resolve(input.trim())
   const repo = rootsRepo(db)
   const lowered = target.toLowerCase()
@@ -212,6 +235,10 @@ export function resolveImportTarget(input: string, options: ImportOptions, db: D
     if (!best || root.path.length > best.path.length) best = { id: root.id, path: root.path }
   }
   if (best) return { rootId: best.id, rootPath: best.path, scanRoot: target, relBase: best.path }
+
+  if (mode.allowUnregistered) {
+    return { rootId: '', rootPath: target, scanRoot: target, relBase: target }
+  }
 
   if (options.registerAsRoot === false) {
     throw new AppError(ERROR_CODES.invalidArgument, '该目录不属于任何书库，请先添加为书库根目录')
@@ -250,7 +277,7 @@ export async function buildScanPreview(
   options: ImportOptions = {},
   db: Db = getDb()
 ): Promise<ScanPreviewDTO> {
-  const target = resolveImportTarget(input, { ...options, registerAsRoot: false }, db)
+  const target = resolveImportTarget(input, options, db, { allowUnregistered: true })
   const started = performance.now()
 
   const scan = await scanDirectory(target.scanRoot, {
