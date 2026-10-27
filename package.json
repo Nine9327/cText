@@ -28,7 +28,8 @@
     "build:worker": "node scripts/build-worker.mjs",
     "dist:dir": "electron-vite build && node scripts/dist.mjs --win --dir",
     "dist": "electron-vite build && node scripts/dist.mjs --win",
-    "verify:package": "node scripts/verify-package.mjs"
+    "verify:package": "node scripts/verify-package.mjs",
+    "verify:roots": "node scripts/verify-roots.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

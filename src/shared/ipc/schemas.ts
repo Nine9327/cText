@@ -11,6 +11,12 @@
 import { z } from 'zod'
 import type { IpcMap } from './contract'
 
+/** Windows 路径上限 32767，但实际可用远小于此；4096 足以覆盖一切正常场景，也能挡住畸形输入 */
+const pathSchema = z.string().min(1, '路径不能为空').max(4096, '路径过长')
+
+/** 主键统一是 ULID（26 字符），但这里不锁死格式，免得将来换 ID 方案还要改校验 */
+const idSchema = z.string().min(1, '缺少 ID').max(64, 'ID 过长')
+
 export const echoRequestSchema = z.object({
   message: z.string().min(1, '不能为空').max(2000, '最多 2000 字符'),
   delayMs: z.number().int().min(0).max(10_000).optional(),
@@ -21,7 +27,15 @@ export const ipcSchemas = {
   'system:echo': echoRequestSchema,
   'system:info': z.void(),
   'system:worker-health': z.void(),
-  'window:get-state': z.void()
+  'window:get-state': z.void(),
+
+  // 根目录（M1-01）
+  'roots:list': z.void(),
+  /** scanNow 对应产品文档 §2.3「添加根目录 → 可选立即扫描导入」，真正扫描由 M1-02 接 */
+  'roots:add': z.object({ path: pathSchema, scanNow: z.boolean() }),
+  'roots:check': z.void(),
+  'roots:relocate': z.object({ rootId: idSchema, newPath: pathSchema }),
+  'roots:remove': z.object({ rootId: idSchema })
 } satisfies Partial<{ [K in keyof IpcMap]: z.ZodType<IpcMap[K]['input']> }>
 
 /** 有 schema 的通道 = 允许注册 handler 的通道 */

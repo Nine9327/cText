@@ -10,8 +10,11 @@ import { runLogSmoke } from './log/smoke'
 import { registerLogIpc } from './ipc/log'
 import { installIpc } from './ipc/registry'
 import { runIpcSmoke } from './ipc/smoke'
+import { registerRootsIpc } from './ipc/roots'
 import { registerSystemIpc } from './ipc/system'
 import { attachWindowStateEvents, registerWindowIpc } from './ipc/window'
+import { installRootsMonitor, stopRootsMonitor } from './library/roots-monitor'
+import { runRootsSmoke } from './library/smoke'
 import { runPackageSmoke } from './package/smoke'
 import { runUiSmoke } from './ui/smoke'
 import {
@@ -250,6 +253,7 @@ if (!gotLock) {
     registerWindowIpc()
     registerSystemIpc()
     registerLogIpc()
+    registerRootsIpc()
     installIpc()
 
     // M0-03：数据库在窗口创建之前初始化，失败则不进入界面
@@ -302,7 +306,19 @@ if (!gotLock) {
       return
     }
 
+    // M1-01 自检：根目录登记 / 掉线恢复 / 重定位 / 移除 + roots:changed 广播。
+    // 必须用 --user-data-dir=<临时目录> 启动，否则会往真实书库里写测试根目录。
+    if (!app.isPackaged && mainWindow && process.env['CTEXT_ROOTS_SMOKE'] === '1') {
+      const code = await runRootsSmoke(mainWindow)
+      await disposePythonBridge()
+      app.exit(code)
+      return
+    }
+
     getPythonBridge().start()
+
+    // M1-01：根目录状态监测。启动检测不阻塞窗口，焦点检测按 30s 节流
+    installRootsMonitor()
 
     // M0-07：生产包自检（scripts/verify-package.mjs 触发）。
     // 与上面的开发态自检相反——这里**只在** isPackaged 为真时才有意义。
@@ -333,6 +349,7 @@ if (!gotLock) {
   // 正常退出时关闭连接，让 WAL 落盘并清掉 -wal / -shm；
   // 同时停掉 Python worker（关 stdin 让它自己退，避免留下孤儿进程）
   app.on('will-quit', () => {
+    stopRootsMonitor()
     closeDatabase()
     void disposePythonBridge()
     // 启动状态落干净：正常退出不该在下次启动时被当成崩溃

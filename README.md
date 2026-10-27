@@ -51,6 +51,7 @@ uv pip install -r python/ctext_worker/requirements.txt --python .venv/Scripts/py
 | `pnpm verify:bridge` | M0-05 Python 桥验收（帧解码、超时、杀进程自恢复、重启上限） |
 | `pnpm verify:log` | M0-06 日志验收（落盘、脱敏、级别、耗时、错误码映射、全局兜底 + toast） |
 | `pnpm verify:ui` | M0-08 侧栏验收（五入口切换、选中态唯一、书库过滤与离线态、两级折叠、空页面） |
+| `pnpm verify:roots` | M1-01 根目录验收（登记查重、掉线与恢复、事件广播、重定位、移除不删书） |
 | `pnpm verify:package` | M0-07 打包验收（构建 → 解包目录 → 真跑一次自检）；加 `--installer` 连安装/卸载一起验 |
 | `pnpm build:worker` | 用 PyInstaller 把 Python worker 打成 `resources/python/ctext-worker/` |
 | `pnpm check:env` / `pnpm check:env:electron` | 环境自检 |
@@ -67,12 +68,13 @@ uv pip install -r python/ctext_worker/requirements.txt --python .venv/Scripts/py
 src/
 ├─ main/               主进程
 │  ├─ index.ts         app 生命周期、单实例锁、窗口创建、日志/兜底初始化
-│  ├─ ipc/             通道注册（registry / system / window / log）+ 冒烟
-│  ├─ db/              连接、PRAGMA、版本化迁移、DDL
+│  ├─ ipc/             通道注册（registry / system / window / log / roots）+ 冒烟
+│  ├─ db/              连接、PRAGMA、版本化迁移、DDL；repositories/ 是各表的 SQL 封装
+│  ├─ library/         书库业务：根目录探测与状态监测（roots-monitor）+ 冒烟
 │  ├─ bridge/          Python worker：进程管理、NDJSON 协议、定位启动命令
 │  ├─ log/             结构化日志：JSON Lines 落盘、按天滚动、级别过滤、计时
 │  ├─ errors/          全局异常兜底（uncaughtException / 渲染进程退出 / preload 失败…）
-│  └─ utils/           脱敏（redact）、错误码映射（to-app-error）、toast 推送（notify）
+│  └─ utils/           脱敏（redact）、错误码映射（to-app-error）、toast 推送（notify）、ULID（id）
 ├─ preload/            contextBridge 白名单，渲染层唯一入口
 ├─ renderer/           Vue 3 渲染层
 │  ├─ api/             IPC 调用的类型化封装（组件唯一出口）
@@ -122,6 +124,27 @@ docs/                  产品文档 / 开发计划 / MVP 范围
 
 健康状态可从渲染层读：`window.api.invoke('system:worker-health')`（永抛不错，未就绪时 `worker` 为 `null`）。
 
+## 书库根目录（M1-01）
+
+多根目录是本产品的核心结构：`D:\books` 与 `F:\移动硬盘\小说` 可同时登记，拔盘不影响任何数据。
+
+| 通道 | 说明 |
+| --- | --- |
+| `roots:list` | 只读库，不探测。带 `bookCount` 子查询 |
+| `roots:add` | 规范化路径 → 探测可读 → 查重 → 登记；`label` 取目录名 |
+| `roots:check` | 全量探测并落 `state`，状态变化的广播 `roots:changed` |
+| `roots:relocate` | 换路径；返回 `{ matched, missing }` 供 UI 提示「42 本里 3 本没找到」 |
+| `roots:remove` | 仅解除登记，书籍解绑 `root_id`（变 NULL）后仍可见 |
+
+几条必须记住的约定：
+
+- **检测时机是「启动 + 主窗口重新获得焦点（节流 30s）+ 手动检测」，没有常驻轮询**。常驻轮询会在移动硬盘休眠时反复唤醒它，而切回窗口就会触发一次检测，实时性已够。
+- **状态没变时也更新 `last_check_at`（节流 60s）**，否则「上次检测」会永远停在最后一次状态变化那一刻。
+- **只有状态变化才广播**，且事件在全部落库之后才发 —— 订阅方收到事件立刻回查 `roots:list` 能读到新状态。
+- **`roots:remove` 不删书**：`books.root_id` 外键没有 `ON DELETE`，所以仓储在同一事务里先 `UPDATE books SET root_id = NULL` 再删根目录。解绑后的书 `root_id` 为 NULL，与网络书共用同一表示，靠 `source_type` 区分。
+- **路径查重靠 `lower(path)`**：SQLite 是字节级比较，而 Windows 大小写不敏感，不折叠 `D:\Books` 与 `d:\books` 会被登记成两条。
+- 验收命令 `pnpm verify:roots`（40 项，用删除临时目录模拟拔盘）。**必须带 `--user-data-dir`**：自检会往库里写测试根目录。
+
 ## 界面骨架（M0-08）
 
 侧栏五个入口，全部可在折叠态以图标形式使用：
@@ -140,8 +163,8 @@ docs/                  产品文档 / 开发计划 / MVP 范围
 - **侧栏 240px ↔ 64px**：折叠按钮在底部（展开态是左侧箭头，折叠态在最下方）。折叠态不隐藏入口，只是变成图标 + `title` 提示。
 - **折叠偏好存 localStorage**（`ctext.ui.v1`），不写库：它不是业务数据，写库要走 IPC 往返。
 - **当前根目录不持久化**：每次启动都是「全部书库」。避免"上次选了移动硬盘，这次拔盘开机看到空列表"。
-- **所有数据仍是 mock**（`src/renderer/mock/library.ts`，16 本书 / 3 个根目录 / 2 个书架 / 3 个书源）。M1-01 起换成 `roots:*` 与 `library:list`，侧栏组件不用动。
-- **未实现动作给 toast**，不假装成功：新建书架 → M3-02、导入书籍 → M1-06、导入书源 → M4-07、重新指定目录 → M1-01。
+- **渲染层仍用 mock 数据**（`src/renderer/mock/library.ts`，16 本书 / 3 个根目录 / 2 个书架 / 3 个书源）。`roots:*` 后端已在 M1-01 完成，但界面还没接，换成真实查询是 M1-08 的事，届时侧栏组件不用动。
+- **未实现动作给 toast**，不假装成功：新建书架 → M3-02、导入书籍 → M1-06、导入书源 → M4-07、重新指定目录 → M1-07（后端 `roots:relocate` 已可用）。
 
 ## 日志与错误处理（M0-06）
 
