@@ -1,0 +1,41 @@
+{
+  "name": "ctext",
+  "version": "0.1.0",
+  "private": true,
+  "description": "cText - 本地优先的 Windows 桌面小说阅读器",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "dev:web": "vite --config vite.web.config.ts",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "vue-tsc --noEmit -p tsconfig.web.json",
+    "check:env": "node scripts/verify-env.mjs",
+    "check:env:electron": "node scripts/run-electron-check.mjs",
+    "rebuild:native": "electron-rebuild -f -o better-sqlite3 --build-from-source -d https://artifacts.electronjs.org/headers/dist",
+    "postinstall": "pnpm rebuild:native"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "pinia": "^2.3.0",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.1",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^22.10.2",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "autoprefixer": "^10.4.20",
+    "electron": "^32.2.6",
+    "electron-vite": "^2.3.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.11",
+    "vue-tsc": "^2.1.10"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

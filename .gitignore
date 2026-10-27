@@ -1,0 +1,29 @@
+# 依赖
+node_modules/
+.pnpm-store/
+
+# 构建产物
+out/
+dist/
+release/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+python/**/build/
+python/**/dist/
+
+# 编辑器 / 系统
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.log
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# 本地数据
+*.db
+*.db-wal
+*.db-shm

@@ -1,0 +1,113 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 颜色用 RGB 三元组定义，方便 Tailwind 的透明度修饰符（text-ink/90 等）生效 */
+:root {
+  --bg-app: 23 24 26;
+  --bg-sidebar: 27 28 31;
+  --bg-elevated: 32 34 38;
+  --bg-card: 33 35 39;
+  --bg-hover: 42 44 49;
+  --bg-active: 49 52 58;
+  --border: 42 44 49;
+  --border-strong: 58 61 68;
+  --text: 231 233 236;
+  --text-dim: 154 161 171;
+  --text-faint: 107 114 128;
+  --accent: 91 141 239;
+
+  color-scheme: dark;
+}
+
+@layer base {
+  html,
+  body,
+  #app {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: rgb(var(--bg-app));
+    color: rgb(var(--text));
+    font-family: 'Segoe UI', 'Microsoft YaHei UI', 'Microsoft YaHei', system-ui, sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow: hidden;
+  }
+
+  button {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+  }
+
+  input {
+    font: inherit;
+    color: inherit;
+  }
+
+  ::selection {
+    background: rgb(var(--accent) / 0.18);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgb(52 55 61);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 6px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgb(69 73 79);
+    background-clip: content-box;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@layer utilities {
+  /* 窗口拖拽区（Electron 无边框窗口） */
+  .app-drag {
+    -webkit-app-region: drag;
+  }
+
+  .app-no-drag {
+    -webkit-app-region: no-drag;
+  }
+}
+
+@layer components {
+  .ct-icon-btn {
+    @apply inline-flex h-7 w-7 items-center justify-center rounded-md text-dim transition-colors duration-120 hover:bg-hover hover:text-ink;
+  }
+
+  .ct-btn {
+    @apply inline-flex items-center gap-1.5 rounded-md border border-line bg-elevated px-3 py-1.5 text-[12.5px] text-dim transition-colors duration-120 hover:border-line-strong hover:text-ink;
+  }
+
+  .ct-nav-item {
+    @apply flex w-full items-center gap-2.5 rounded-md px-2.5 py-[7px] text-[13px] text-dim transition-colors duration-120 hover:bg-hover hover:text-ink;
+  }
+
+  .ct-nav-item-active {
+    @apply bg-active text-ink;
+  }
+
+  .ct-section-title {
+    @apply px-2.5 text-[11px] font-medium tracking-wider text-faint;
+  }
+}
