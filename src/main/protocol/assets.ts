@@ -22,11 +22,20 @@ export const ASSET_SCHEME = 'ctext-asset'
 const ASSET_HOST = 'asset'
 
 /** 名字必须是我们自己写出去的形状：内容哈希 + 图片后缀 */
-const NAME_RE = /^[a-f0-9]{16}\.(png|jpg|gif|webp|bmp|svg)$/
+const NAME_RE = /^[a-f0-9]{16}\.(png|jpg|jpeg|gif|webp|bmp|svg)$/
+
+/**
+ * 封面缓存的名字（Python `write_cover`：`cover_<sha1-16>.<ext>`）。
+ *
+ * 与书内插图分开校验：两者落盘目录不同（covers / epub-assets），
+ * 按前缀分流才能保证「一个名字只可能指向一个文件」。
+ */
+const COVER_NAME_RE = /^cover_[a-f0-9]{16}\.(png|jpg|jpeg|gif|webp|bmp|svg)$/
 
 const MIME: Record<string, string> = {
   png: 'image/png',
   jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
   gif: 'image/gif',
   webp: 'image/webp',
   bmp: 'image/bmp',
@@ -36,6 +45,14 @@ const MIME: Record<string, string> = {
 /** 图片缓存目录（与 covers 同级，但分开：书内插图可能很多） */
 export function assetsDir(): string {
   return join(app.getPath('userData'), 'epub-assets')
+}
+
+/**
+ * 封面缓存目录。与 `ipc/import.coversDir` 是同一处（userData/covers）——
+ * 这里不直接 import 它：协议模块被自检单独加载，不该拖上整条导入链。
+ */
+function coversDir(): string {
+  return join(app.getPath('userData'), 'covers')
 }
 
 /** 必须在 app ready 之前调用 */
@@ -69,7 +86,7 @@ export function assetNameOf(rawUrl: string): string | null {
   } catch {
     return null
   }
-  return NAME_RE.test(name) ? name : null
+  return NAME_RE.test(name) || COVER_NAME_RE.test(name) ? name : null
 }
 
 /** 在 app ready 之后调用 */
@@ -79,7 +96,9 @@ export function installAssetProtocol(): void {
     if (!name) return new Response('', { status: 400 })
 
     try {
-      const bytes = await readFile(join(assetsDir(), name))
+      // cover_ 前缀指向封面缓存，其余是书内插图——同一个名字只可能在一处
+      const dir = name.startsWith('cover_') ? coversDir() : assetsDir()
+      const bytes = await readFile(join(dir, name))
       const ext = name.split('.').pop() ?? ''
       return new Response(new Uint8Array(bytes), {
         headers: {

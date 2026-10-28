@@ -17,7 +17,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSyn
 import { join } from 'node:path'
 import { app } from 'electron'
 import { openDatabase, type Db } from '../db/connection'
-import { booksRepo } from '../db/repositories/books'
+import { booksRepo, getBookDetail } from '../db/repositories/books'
 import { rootsRepo } from '../db/repositories/roots'
 import { getPythonBridge } from '../bridge'
 import {
@@ -190,10 +190,19 @@ export async function runImportSmoke(): Promise<Check[]> {
     }
 
     if (importedEpub.includes('cover_meta.epub')) {
-      const row = db.prepare("SELECT cover_path FROM books WHERE rel_path = 'cover_meta.epub'").get() as
-        | { cover_path: string | null }
+      const row = db.prepare("SELECT id, cover_path FROM books WHERE rel_path = 'cover_meta.epub'").get() as
+        | { id: string; cover_path: string | null }
         | undefined
       check('EPUB 封面被抽出入库', Boolean(row?.cover_path) && !String(row?.cover_path).includes(':'), String(row?.cover_path))
+      // 封面要能到达渲染层：DTO 里必须是 ctext-asset 协议 URL（books 仓储负责拼）
+      if (row?.cover_path) {
+        const detail = getBookDetail(db, row.id)
+        check(
+          '封面映射为 ctext-asset 协议 URL',
+          detail?.coverUrl === `ctext-asset://asset/${row.cover_path}`,
+          detail?.coverUrl ?? 'coverUrl=null'
+        )
+      }
     }
 
     // ---------------------------------------------------------------- 场景 B：重复导入不产生脏数据

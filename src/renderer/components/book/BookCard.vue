@@ -2,9 +2,10 @@
 /**
  * 书籍卡片（三种视图共用一套数据）。
  *
- * 封面一律用「id 哈希取色」的占位渐变：真实封面要等 M2-03 的自定义协议
- * （cover_path 只是缓存文件名，没有可用的 URL scheme）。产品文档 §2.4 明确
- * 无图时就该是取色占位，所以这不是降级而是既定设计。
+ * 封面：优先显示真封面（EPUB 抽取到 covers 目录，走 ctext-asset 自定义协议，
+ * `cover_path → coverUrl` 在主进程的 books 仓储里拼）；**没有封面或图加载失败
+ * 时用「书名 + 哈希取色」的默认封面**——产品文档 §2.4 明确无图就该是取色占位，
+ * 同一本书永远同色。两种形态共用一个容器，靠 `coverSrc` 有无切换。
  *
  * 右上角那组按钮（星标 / 移出书架）是卡片的**兄弟节点**而不是子节点：卡片本身
  * 是 `<button>`，里面再放 `<button>` 在 HTML 里是非法的（浏览器会把内层按钮
@@ -14,7 +15,7 @@
  * 「可拖拽」也是外层的属性（`draggable`）：拖动整张卡去侧栏的书架 = 加入书架，
  * 在书架页里拖到另一张卡上 = 架内排序（M3-02）。
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import AppIcon from '@/components/common/AppIcon.vue'
 import type { BookDTO } from '@shared/dto'
 import { coverGradient } from '@/lib/cover'
@@ -50,6 +51,14 @@ const emit = defineEmits<{
 }>()
 
 const isOffline = computed(() => props.book.offline)
+
+/**
+ * 封面：有真封面（EPUB 抽取的，走 ctext-asset 协议）就显示图；
+ * 加载失败（缓存被清等）回退到「哈希取色默认封面」——占位文字即时回来，
+ * 不留一个破图图标。没有 coverUrl 时 coverSrc 恒为 null，走默认封面。
+ */
+const coverFailed = ref(false)
+const coverSrc = computed(() => (coverFailed.value ? null : props.book.coverUrl))
 
 const coverStyle = computed(() => {
   const { from, to } = coverGradient(props.book.id)
@@ -116,17 +125,28 @@ function onDragStart(event: DragEvent): void {
         :class="isOffline && 'opacity-45 saturate-0'"
         :style="coverStyle"
       >
-        <!-- 书脊与高光 -->
-        <span class="pointer-events-none absolute inset-y-0 left-0 w-[6px] bg-black/25" />
-        <span class="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-white/10" />
-
-        <span
-          class="absolute inset-x-0 top-0 line-clamp-2 pl-2.5 pt-2.5 text-[10.5px] font-medium leading-[1.35] text-white/90"
-          :class="padClass"
-        >
-          {{ book.title }}
-        </span>
-        <span class="absolute inset-x-0 bottom-0 px-2.5 pb-2 text-[9px] text-white/55">{{ book.author ?? '佚名' }}</span>
+        <!-- 默认封面（无图 / 图挂了）：书脊与高光 + 书名作者 -->
+        <template v-if="!coverSrc">
+          <span class="pointer-events-none absolute inset-y-0 left-0 w-[6px] bg-black/25" />
+          <span class="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-white/10" />
+          <span
+            class="absolute inset-x-0 top-0 line-clamp-2 pl-2.5 pt-2.5 text-[10.5px] font-medium leading-[1.35] text-white/90"
+            :class="padClass"
+          >
+            {{ book.title }}
+          </span>
+          <span class="absolute inset-x-0 bottom-0 px-2.5 pb-2 text-[9px] text-white/55">{{ book.author ?? '佚名' }}</span>
+        </template>
+        <!-- 真封面：盖在渐变底上，加载失败由 @error 退回默认封面 -->
+        <img
+          v-if="coverSrc"
+          :src="coverSrc"
+          alt=""
+          loading="lazy"
+          draggable="false"
+          class="absolute inset-0 h-full w-full object-cover"
+          @error="coverFailed = true"
+        />
 
         <span
           v-if="isOffline"
@@ -162,7 +182,16 @@ function onDragStart(event: DragEvent): void {
         :class="isOffline && 'opacity-45 saturate-0'"
         :style="coverStyle"
       >
-        <span class="pointer-events-none absolute inset-y-0 left-0 w-[4px] bg-black/25" />
+        <span v-if="!coverSrc" class="pointer-events-none absolute inset-y-0 left-0 w-[4px] bg-black/25" />
+        <img
+          v-if="coverSrc"
+          :src="coverSrc"
+          alt=""
+          loading="lazy"
+          draggable="false"
+          class="absolute inset-0 h-full w-full object-cover"
+          @error="coverFailed = true"
+        />
         <span
           v-if="isOffline"
           class="absolute inset-x-0 bottom-0 bg-black/70 py-px text-center text-[8.5px] text-white/80"
@@ -197,7 +226,16 @@ function onDragStart(event: DragEvent): void {
         :class="isOffline && 'opacity-45 saturate-0'"
         :style="coverStyle"
       >
-        <span class="pointer-events-none absolute inset-y-0 left-0 w-[3px] bg-black/25" />
+        <span v-if="!coverSrc" class="pointer-events-none absolute inset-y-0 left-0 w-[3px] bg-black/25" />
+        <img
+          v-if="coverSrc"
+          :src="coverSrc"
+          alt=""
+          loading="lazy"
+          draggable="false"
+          class="absolute inset-0 h-full w-full object-cover"
+          @error="coverFailed = true"
+        />
       </div>
       <span class="min-w-0 flex-1 truncate text-[12.5px] text-ink/90">{{ book.title }}</span>
       <span class="hidden w-32 shrink-0 truncate text-[11.5px] text-faint sm:block">{{ book.author ?? '佚名' }}</span>

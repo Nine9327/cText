@@ -276,6 +276,14 @@ export async function runReaderSmoke(win: BrowserWindow): Promise<Check[]> {
       assetNameOf('ctext-asset://asset/notahash.png') === null,
     '全部拒绝'
   )
+  // 封面与书内插图同协议但不同目录（covers / epub-assets），名字分流要各自有效
+  check(
+    '封面文件名（cover_ 前缀）被协议接受、穿越形仍被拒',
+    assetNameOf('ctext-asset://asset/cover_0123456789abcdef.jpg') === 'cover_0123456789abcdef.jpg' &&
+      assetNameOf('ctext-asset://asset/cover_../../ctext.db') === null &&
+      assetNameOf('ctext-asset://asset/cover_notahash.png') === null,
+    '接受 cover_<hash>.<ext>，拒绝其余'
+  )
 
   // ------------------------------------------------------------ 渲染层走 IPC
   const script = String.raw`

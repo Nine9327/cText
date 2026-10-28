@@ -275,6 +275,16 @@ const coverStyle = computed(() => {
   return { background: `linear-gradient(155deg, ${from} 0%, ${to} 100%)` }
 })
 
+/**
+ * 封面：真封面（ctext-asset 协议）优先；没有封面或图挂了回退默认封面。
+ * 换书时重置失败标记——上一本的失败不该连累下一本（coverUrl 也换了）。
+ */
+const coverFailed = ref(false)
+const coverSrc = computed(() => (coverFailed.value ? null : (book.value?.coverUrl ?? null)))
+watch(bookId, () => {
+  coverFailed.value = false
+})
+
 const formatSize = (bytes: number): string => {
   if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
   if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`
@@ -325,7 +335,22 @@ const stateText = computed(() => {
             :style="coverStyle"
             data-detail-cover
           >
-            <span class="pointer-events-none absolute inset-y-0 left-0 w-[6px] bg-black/25" />
+            <!-- 默认封面：书脊 + 书名（无图 / 图挂了时） -->
+            <template v-if="!coverSrc">
+              <span class="pointer-events-none absolute inset-y-0 left-0 w-[6px] bg-black/25" />
+              <span class="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-white/10" />
+              <span class="absolute inset-x-0 top-0 line-clamp-3 pl-2.5 pr-2 pt-2.5 text-[11px] font-medium leading-[1.4] text-white/90">
+                {{ book.title }}
+              </span>
+            </template>
+            <img
+              v-if="coverSrc"
+              :src="coverSrc"
+              alt=""
+              draggable="false"
+              class="absolute inset-0 h-full w-full object-cover"
+              @error="coverFailed = true"
+            />
           </div>
 
           <div class="min-w-0 flex-1">

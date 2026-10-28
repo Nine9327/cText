@@ -187,17 +187,26 @@ interface BookRow {
   created_at: number
   updated_at: number
   root_state: string | null
+  cover_path: string | null
 }
 
 const BOOK_SELECT = `
   SELECT books.id, books.title, books.author, books.series, books.format,
          books.favorite, books.read_state, books.progress, books.chapter_count,
          books.root_id, books.source_type, books.last_read_at,
-         books.created_at, books.updated_at,
+         books.created_at, books.updated_at, books.cover_path,
          library_roots.state AS root_state
   FROM books LEFT JOIN library_roots ON library_roots.id = books.root_id
   WHERE books.deleted_at IS NULL
 `
+
+/**
+ * 封面 URL 前缀（与 protocol/assets 的 ASSET_SCHEME/ASSET_HOST 同一处）。
+ *
+ * 这里刻意不 import 协议模块：仓储层被纯 Node 的自检直接加载，
+ * assets.ts 顶部 import 了 electron 的 app/protocol，会连累这些自检。
+ */
+const COVER_URL_PREFIX = 'ctext-asset://asset/'
 
 function toBookDTO(row: BookRow): import('@shared/dto').BookDTO {
   return {
@@ -206,7 +215,8 @@ function toBookDTO(row: BookRow): import('@shared/dto').BookDTO {
     author: row.author,
     series: row.series,
     format: row.format as import('@shared/dto').BookFormat,
-    coverUrl: null, // 封面自定义协议属 M2-03；此前 UI 用「书名 + 哈希取色」占位
+    // 有封面走 ctext-asset 协议（covers 目录）；无封面为 null，UI 落「默认封面」
+    coverUrl: row.cover_path ? `${COVER_URL_PREFIX}${row.cover_path}` : null,
     favorite: row.favorite === 1,
     readState: row.read_state as import('@shared/dto').ReadState,
     progress: row.progress,
@@ -506,7 +516,7 @@ export function getBookDetail(db: Db, id: string): import('@shared/dto').BookDet
       `SELECT books.id, books.title, books.author, books.series, books.format,
               books.favorite, books.read_state, books.progress, books.chapter_count,
               books.root_id, books.source_type, books.last_read_at,
-              books.created_at, books.updated_at,
+              books.created_at, books.updated_at, books.cover_path,
               books.intro, books.publisher, books.pub_date, books.language,
               books.word_count, books.size_bytes, books.encoding,
               books.rel_path, books.source_id, books.source_url,
