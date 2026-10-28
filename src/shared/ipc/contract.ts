@@ -150,6 +150,9 @@ export type IpcSends = {
   'window:minimize': void
   'window:toggle-maximize': void
   'window:close': void
+  /** 全屏切换（F11，M2-10）。用单向通道：调用方不需要等结果，
+   *  真实状态由 window:state 事件回推 */
+  'window:toggle-fullscreen': void
   /** 渲染层把未捕获异常 / 诊断信息转交主进程写进同一个日志文件（M0-06） */
   'log:renderer': RendererLogDTO
 }

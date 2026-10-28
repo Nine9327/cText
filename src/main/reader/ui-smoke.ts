@@ -728,6 +728,62 @@ async function scenario(win: BrowserWindow, dir: string, check: CheckFn): Promis
     '未出现 [data-settings-panel]'
   )
 
+  // ---------------------------------------------------------------- 快捷键（M2-10）
+  const defaultToc = (await run(win, `const el = q('[data-shortcut="reader.toc"]'); return el ? txt(el) : ''`)) as string
+  check('键位表按默认值渲染', defaultToc === 'Ctrl + T', defaultToc || '没有快捷键段')
+
+  // 录制：点一下再按键。按下 F2 后必须立刻生效并存进 settings.shortcuts
+  await run(win, `
+    q('[data-shortcut="reader.toc"]').click()
+    await sleep(150)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true }))
+    await sleep(300)
+    return true
+  `)
+  const boundToc = (await run(win, `const el = q('[data-shortcut="reader.toc"]'); return el ? txt(el) : ''`)) as string
+  const savedShortcut = loadSettings(getDb()).shortcuts['reader.toc']
+  check(
+    '录制新键位后立即生效并落库',
+    boundToc === 'F2' && savedShortcut === 'F2',
+    `面板显示 ${boundToc} / 库里 ${savedShortcut ?? '空'}`
+  )
+
+  // 新键位真的能开目录（走的是同一份 resolveShortcuts，不是另写一套判断）
+  await run(win, `
+    q('[data-settings-close]').click()
+    await sleep(200)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true }))
+    await sleep(400)
+    return true
+  `)
+  const tocByF2 = (await run(win, `return !!q('[data-toc]')`)) === true
+  check('改键后新键位真的能打开目录', tocByF2, tocByF2 ? 'F2 已生效' : '目录没打开')
+
+  // 冲突：把「下一页」也绑到 F2，必须被拒绝并给出提示
+  await run(win, `
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await sleep(200)
+    q('[data-reader-settings]').click()
+    await sleep(250)
+    q('[data-shortcut="reader.next"]').click()
+    await sleep(150)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'F2', bubbles: true }))
+    await sleep(350)
+    return true
+  `)
+  const conflict = JSON.parse(
+    (await run(win, `
+      const next = q('[data-shortcut="reader.next"]')
+      const toast = q('[data-toast]')
+      return JSON.stringify({ next: next ? txt(next) : '', toast: toast ? txt(toast) : '' })
+    `)) as string
+  ) as { next: string; toast: string }
+  check(
+    '键位冲突被拒绝并提示占用者',
+    conflict.next === '→' && conflict.toast.includes('占用'),
+    `「下一页」仍是 ${conflict.next} / 提示「${conflict.toast}」`
+  )
+
   // 面板里的控件不能溢出窗口：主题色块有 5 个，最容易在窄面板里被挤出去
   const overflow = JSON.parse(
     (await run(win, `
@@ -851,6 +907,12 @@ async function scenario(win: BrowserWindow, dir: string, check: CheckFn): Promis
     restored?.font === `${zoomedFont}px` && restored.bg === 'rgb(23, 24, 27)' && restored.left === 40,
     restored ? `font=${restored.font}（期望 ${zoomedFont}px） bg=${restored.bg} left=${restored.left}px` : '15s 内没重新进入阅读器'
   )
+
+  // 键位跟着设置一起持久化：重启后仍是 F2
+  await run(win, `q('[data-reader-settings]').click(); await sleep(300); return true`)
+  const restoredShortcut = (await run(win, `const el = q('[data-shortcut="reader.toc"]'); return el ? txt(el) : ''`)) as string
+  check('重启后键位仍然生效', restoredShortcut === 'F2', restoredShortcut || '没有快捷键段')
+  await run(win, `q('[data-settings-close]').click(); await sleep(200); return true`)
 
   // ---------------------------------------------------------------- 退出
   await run(win, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await sleep(200); return true`)

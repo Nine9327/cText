@@ -12,10 +12,16 @@
  * 每次都走 IPC 写库既浪费又会让 `updated_at` 疯狂抖动；300ms 的空闲窗口
  * 足够把一次「拖动」合并成一次写入。
  */
+import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
 import type { BookFormat, ReaderSettingsDTO, ReaderTheme } from '@shared/dto'
 import { call } from '@/api'
+import {
+  normalizeCombo,
+  resolveShortcuts,
+  SHORTCUTS,
+  type ShortcutAction
+} from '@/reader/keymap'
 
 /** 生效中的阅读模式（'auto' 已经被解成具体值） */
 export type ReaderMode = 'paged' | 'scroll'
@@ -99,6 +105,11 @@ export const useReaderStore = defineStore('reader', () => {
   const rememberProgress = ref(true)
   /** 设置是否已从主进程读回来：没读到之前不要把默认值写回库（会覆盖用户设置） */
   const loaded = ref(false)
+  /** 用户改过的键位（动作 → 组合）。没改过的动作不出现在这里，取 keymap 的默认值 */
+  const shortcuts = ref<Record<string, string>>({})
+
+  /** 生效键位 + 冲突明细（M2-10）。界面与按键匹配都读这一份 */
+  const resolvedShortcuts = computed(() => resolveShortcuts(shortcuts.value))
 
   /**
    * 上下页边距。设置里只有一个「页边距」，横向直接用、纵向取 0.6 倍：
@@ -130,11 +141,16 @@ export const useReaderStore = defineStore('reader', () => {
     try {
       const settings = await call('settings:get')
       apply(settings.reader)
+      applyShortcuts(settings.shortcuts)
     } catch {
       // 读不到就用默认值继续读：设置坏了不该让人打不开书
     } finally {
       loaded.value = true
     }
+  }
+
+  function applyShortcuts(map: Record<string, string> | undefined): void {
+    shortcuts.value = { ...(map ?? {}) }
   }
 
   function apply(reader: ReaderSettingsDTO): void {
@@ -262,6 +278,24 @@ export const useReaderStore = defineStore('reader', () => {
     return format === 'epub' ? 'scroll' : 'paged'
   }
 
+  /**
+   * 改键位。冲突时**不写入**并返回占用者——「按一下触发两件事」比「这个键暂时没绑上」糟得多。
+   * 键位是离散操作（点一次、按一个键），直接落库不走节流。
+   */
+  function setShortcut(action: ShortcutAction, combo: string): { ok: true } | { ok: false; conflict: ShortcutAction } {
+    const normalized = normalizeCombo(combo)
+    if (!normalized) return { ok: false, conflict: action }
+
+    const owner = SHORTCUTS.find(
+      (item) => item.action !== action && (shortcuts.value[item.action] ?? item.primary) === normalized
+    )
+    if (owner) return { ok: false, conflict: owner.action }
+
+    shortcuts.value = { ...shortcuts.value, [action]: normalized }
+    void call('settings:patch', { patch: { shortcuts: { [action]: normalized } } }).catch(() => undefined)
+    return { ok: true }
+  }
+
   function resetTypography(): void {
     typography.value = {
       fontSize: 18,
@@ -298,6 +332,9 @@ export const useReaderStore = defineStore('reader', () => {
     fontFamily,
     mode,
     rememberProgress,
+    shortcuts,
+    resolvedShortcuts,
+    setShortcut,
     setRememberProgress,
     loaded,
     load,

@@ -30,6 +30,8 @@ import type { TextSelection } from '@/components/reader/PagedView.vue'
 import type { PageSnapshot } from '@/reader/paginate'
 import type { ScrollSnapshot } from '@/reader/scroll'
 import { useReaderStore, type ReaderMode } from '@/stores/reader'
+import { matchesAction, type ShortcutAction } from '@/reader/keymap'
+import { windowApi } from '@/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -439,62 +441,97 @@ function setMode(next: ReaderMode): void {
 
 // ---------------------------------------------------------------- 键盘
 
+/**
+ * Esc 的语义分层：先取消刚划出的选区 → 关笔记 → 关排版 → 关目录 → 退出阅读器。
+ * 一次 Esc 只做一件事，读者的意图总是「退回到上一步」。
+ */
+function closeTopLayer(): void {
+  if (selection.value) {
+    clearSelection()
+    return
+  }
+  if (notesOpen.value) {
+    notesOpen.value = false
+    return
+  }
+  if (settingsOpen.value) {
+    settingsOpen.value = false
+    return
+  }
+  if (tocOpen.value) {
+    tocOpen.value = false
+    return
+  }
+  void router.push('/library')
+}
+
 function onKeydown(event: KeyboardEvent): void {
   if (event.defaultPrevented) return
   const target = event.target as HTMLElement | null
-  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
+  if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
 
-  if (event.ctrlKey && (event.key === '=' || event.key === '+' || event.key === '-')) {
+  // 键位来自设置（M2-10）：改键之后立刻生效，不需要重启
+  const keys = reader.resolvedShortcuts
+  const hit = (action: ShortcutAction): boolean => matchesAction(event, action, keys)
+
+  if (hit('reader.back')) {
     event.preventDefault()
-    reader.stepFontSize(event.key === '-' ? -1 : 1)
+    closeTopLayer()
     return
   }
-
-  if (event.ctrlKey && (event.key === 't' || event.key === 'T')) {
+  if (hit('reader.next')) {
+    event.preventDefault()
+    turn(1, 'page')
+    return
+  }
+  if (hit('reader.prev')) {
+    event.preventDefault()
+    turn(-1, 'page')
+    return
+  }
+  if (hit('reader.lineNext')) {
+    event.preventDefault()
+    turn(1, 'line')
+    return
+  }
+  if (hit('reader.linePrev')) {
+    event.preventDefault()
+    turn(-1, 'line')
+    return
+  }
+  if (hit('reader.toc')) {
     event.preventDefault()
     void toggleToc()
     return
   }
-
-  if (event.ctrlKey && (event.key === 'd' || event.key === 'D')) {
+  if (hit('reader.notes')) {
+    event.preventDefault()
+    notesOpen.value = !notesOpen.value
+    return
+  }
+  if (hit('reader.settings')) {
+    event.preventDefault()
+    settingsOpen.value = !settingsOpen.value
+    return
+  }
+  if (hit('reader.bookmark')) {
     event.preventDefault()
     void addBookmarkHere()
     return
   }
-
-  switch (event.key) {
-    case 'ArrowRight':
-    case 'PageDown':
-      event.preventDefault()
-      turn(1)
-      break
-    case 'ArrowLeft':
-    case 'PageUp':
-      event.preventDefault()
-      turn(-1)
-      break
-    case 'ArrowDown':
-      event.preventDefault()
-      turn(1, 'line')
-      break
-    case 'ArrowUp':
-      event.preventDefault()
-      turn(-1, 'line')
-      break
-    case ' ':
-      event.preventDefault()
-      turn(event.shiftKey ? -1 : 1)
-      break
-    case 'Escape':
-      event.preventDefault()
-      // 浮层开着时 Esc 只关浮层：读者的意图是「退出目录/面板」，不是「退出阅读」
-      if (notesOpen.value) notesOpen.value = false
-      else if (settingsOpen.value) settingsOpen.value = false
-      else if (tocOpen.value) tocOpen.value = false
-      else void router.push('/library')
-      break
-    default:
-      break
+  if (hit('reader.fontUp')) {
+    event.preventDefault()
+    reader.stepFontSize(1)
+    return
+  }
+  if (hit('reader.fontDown')) {
+    event.preventDefault()
+    reader.stepFontSize(-1)
+    return
+  }
+  if (hit('reader.fullscreen')) {
+    event.preventDefault()
+    windowApi.toggleFullscreen()
   }
 }
 

@@ -24,6 +24,14 @@ export function registerWindowIpc(): void {
 
   registerSend('window:close', ({ window }) => window?.close())
 
+  // 全屏用 setFullScreen 而不是最大化：阅读器要的是「没有标题栏、铺满屏幕」，
+  // 最大化仍然保留窗口边框。状态变化由 attachWindowStateEvents 里的
+  // enter-full-screen / leave-full-screen 回推。
+  registerSend('window:toggle-fullscreen', ({ window }) => {
+    if (!window) return
+    window.setFullScreen(!window.isFullScreen())
+  })
+
   registerHandler('window:get-state', (_input, ctx) => {
     if (!ctx.window) throw new AppError(ERROR_CODES.internal, '调用窗口已销毁')
     return windowStateOf(ctx.window)

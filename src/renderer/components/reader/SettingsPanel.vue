@@ -9,8 +9,15 @@
  * 面板是右侧覆盖层而不是常驻侧栏：常驻会挤窄正文 → 每次开合都触发一次
  * 分页重排，读者会觉得「开个设置，正文跳了一下」。
  */
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import AppIcon from '@/components/common/AppIcon.vue'
+import { pushToast } from '@/lib/toast'
+import {
+  comboFromEvent,
+  displayCombo,
+  SHORTCUTS,
+  type ShortcutAction
+} from '@/reader/keymap'
 import {
   FONT_OPTIONS,
   FONT_SIZE_MAX,
@@ -29,6 +36,53 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 const reader = useReaderStore()
 
 const fontSizeLabel = computed(() => `${reader.typography.fontSize}px`)
+
+// ---------------------------------------------------------------- 快捷键（M2-10）
+
+const recording = ref<ShortcutAction | null>(null)
+
+function labelOf(action: ShortcutAction): string {
+  return SHORTCUTS.find((item) => item.action === action)?.label ?? action
+}
+
+/**
+ * 录制键位。
+ *
+ * 监听挂在 **capture 阶段**并用 `stopImmediatePropagation`：阅读器自己的 keydown
+ * 也在 window 上，不拦住的话「录一个 → 键」会同时翻页。捕获阶段先跑，拦得干净。
+ */
+function startRecord(action: ShortcutAction): void {
+  stopRecord()
+  recording.value = action
+  window.addEventListener('keydown', capture, true)
+}
+
+function stopRecord(): void {
+  recording.value = null
+  window.removeEventListener('keydown', capture, true)
+}
+
+function capture(event: KeyboardEvent): void {
+  if (!recording.value) return
+  event.preventDefault()
+  event.stopImmediatePropagation()
+
+  if (event.key === 'Escape') {
+    stopRecord()
+    return
+  }
+
+  const action = recording.value
+  const combo = comboFromEvent(event)
+  const result = reader.setShortcut(action, combo)
+  if (!result.ok) {
+    // 冲突时不改，并说清楚被谁占了——否则用户只会觉得「点了没反应」
+    pushToast({ level: 'warn', message: `${displayCombo(combo)} 已被「${labelOf(result.conflict)}」占用` })
+  }
+  stopRecord()
+}
+
+onBeforeUnmount(() => stopRecord())
 const marginLabel = computed(() => `${reader.typography.margin}px`)
 
 /** range 的值永远是字符串，转换与取整都放在这里，模板里只负责绑 */
@@ -239,6 +293,36 @@ function onColor(event: Event, which: 'bg' | 'text'): void {
             <option v-for="font in FONT_OPTIONS" :key="font.value" :value="font.value">{{ font.label }}</option>
           </select>
           <p class="mt-1.5 text-[10.5px] leading-relaxed text-faint">导入字体在 M5 的存储与字体设置里提供。</p>
+        </section>
+
+        <!-- 快捷键：键位存 settings.shortcuts，与设置页是同一份数据 -->
+        <section>
+          <p class="mb-1.5 text-[11px] tracking-wider text-faint">快捷键</p>
+          <div class="space-y-1">
+            <div v-for="item in SHORTCUTS" :key="item.action" class="flex items-center gap-2 text-[11.5px]">
+              <span class="min-w-0 flex-1 truncate text-dim">{{ item.label }}</span>
+              <button
+                class="shrink-0 rounded border px-1.5 py-0.5 tabular-nums transition-colors duration-120"
+                :class="
+                  recording === item.action
+                    ? 'border-accent text-accent'
+                    : 'border-line text-faint hover:border-line-strong hover:text-dim'
+                "
+                :data-shortcut="item.action"
+                :title="recording === item.action ? '按下新的组合键，Esc 取消' : '点击后按下新的组合键'"
+                @click="startRecord(item.action)"
+              >
+                {{ recording === item.action ? '按下按键…' : displayCombo(reader.resolvedShortcuts.bindings[item.action] ?? '') }}
+              </button>
+            </div>
+          </div>
+          <p v-if="reader.resolvedShortcuts.conflicts.length > 0" class="mt-1.5 text-[10.5px] leading-relaxed text-[#e0a23c]" data-shortcut-conflicts>
+            键位冲突：
+            <span v-for="conflict in reader.resolvedShortcuts.conflicts" :key="conflict.combo">
+              {{ displayCombo(conflict.combo) }} 被 {{ conflict.actions.map(labelOf).join(' / ') }} 同时占用
+            </span>
+          </p>
+          <p v-else class="mt-1.5 text-[10.5px] leading-relaxed text-faint">与设置页共用同一份键位表。</p>
         </section>
       </div>
     </aside>

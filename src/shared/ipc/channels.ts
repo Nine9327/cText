@@ -78,6 +78,7 @@ export const SEND_CHANNELS = defineChannels<IpcSendChannel>()([
   'window:minimize',
   'window:toggle-maximize',
   'window:close',
+  'window:toggle-fullscreen',
   'log:renderer'
 ])
 
