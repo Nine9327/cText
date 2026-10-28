@@ -40,11 +40,11 @@ const router = useRouter()
  *
  * 离线书也照常进阅读器：阅读器里有完整的离线面板（M2-11 会在那里接
  * 「重新指定目录」），比在列表里拦一个 toast 更有出路。
- * 网络书还没有正文通路（M3），先给提示而不是跳进一个空白阅读页。
+ * 网络书还没有正文通路（书源模块属 M4），先给提示而不是跳进一个空白阅读页。
  */
 function openBook(book: BookDTO): void {
   if (book.sourceType === 'network') {
-    pushToast({ level: 'info', message: '网络书阅读将在 M3-04 提供' })
+    pushToast({ level: 'info', message: '网络书阅读暂未开放' })
     return
   }
   void router.push(`/reader/${book.id}`)
@@ -430,11 +430,6 @@ function importBooks(): void {
   imports.open()
 }
 
-function relocateRoot(): void {
-  // roots:relocate 的通道已就绪（M1-01）；交互入口与「管理书库」页一起规划
-  pushToast({ level: 'info', message: '重新指定目录将在「管理书库」页提供' })
-}
-
 // ---------------------------------------------------------------- 虚拟滚动
 
 const scrollEl = ref<HTMLElement | null>(null)
@@ -574,7 +569,6 @@ watch(
           <span class="font-mono text-[11.5px]">{{ library.activeRoot.path }}</span>
           当前不可用。书籍与阅读进度都已保留，连接磁盘或重新指定目录后自动恢复。
         </p>
-        <button type="button" class="ct-btn shrink-0" @click="relocateRoot">重新指定目录</button>
       </div>
 
       <!-- 最近阅读（仅书库首页） -->
@@ -628,15 +622,10 @@ watch(
           <CategoryFilter @manage="managingCategories = true" />
           <SortMenu :shelf="isShelf" />
 
-          <div class="flex">
-            <button class="ct-btn rounded-r-none" title="导入书籍" data-import-trigger @click="importBooks">
-              <AppIcon name="import" :size="14" />
-              导入书籍文件
-            </button>
-            <button class="ct-btn rounded-l-none border-l-0 px-1.5" title="更多导入方式">
-              <AppIcon name="chevron-down" :size="12" class="text-faint" />
-            </button>
-          </div>
+          <button class="ct-btn" title="导入书籍" data-import-trigger @click="importBooks">
+            <AppIcon name="import" :size="14" />
+            导入书籍文件
+          </button>
         </div>
       </div>
 

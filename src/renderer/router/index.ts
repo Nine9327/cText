@@ -7,12 +7,15 @@ import ReaderView from '@/views/ReaderView.vue'
 import BookDetailView from '@/views/BookDetailView.vue'
 
 /**
- * 路由表。五个侧栏入口各有独立去处（对齐产品文档 §2.2）：
+ * 路由表。侧栏入口各有独立去处（对齐产品文档 §2.2）：
  *   /library   全部书籍（受当前书库根目录过滤）
  *   /favorites 收藏的书籍
  *   /shelves   我的书架总览 → /shelves/:shelfId 单个书架
  *   /sources   网络小说总览 → /sources/:sourceId 单个书源
  * 加 /reader、/settings 两个未实现页，空状态由 ComingSoonView 承担。
+ *
+ * **侧栏只渲染已实现的入口**（书库/收藏/书架）：/sources 与 /settings 的路由
+ * 保留——直接输 URL 仍能到达，但侧栏不再给入口，避免用户点进占位页。
  */
 export const router = createRouter({
   // Electron 用 file:// 加载，hash 模式最省事

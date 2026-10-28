@@ -2,12 +2,16 @@
 /**
  * 侧栏骨架（产品文档 §2.2）：书库切换器 / 全部书籍 / 收藏 / 我的书架 / 网络小说。
  *
- * 五条硬约定：
+ * 四条硬约定：
  *   1. 展开态固定 240px，折叠态 64px 图标栏；宽度过渡 120ms，与全局动效一致。
  *   2. 选中态只有一个：靠 RouterLink 的 active-class 实现，别处不再写"当前项"判断。
- *   3. 分区（我的书架 / 网络小说）的**标题是入口**，右侧箭头才是折叠键。
- *   4. 折叠态不渲染分区明细，五个入口退化成图标按钮（hover 有 title 提示）。
+ *   3. 分区（我的书架）的**标题是入口**，右侧箭头才是折叠键。
+ *   4. 折叠态不渲染分区明细，入口退化成图标按钮（hover 有 title 提示）。
  *   5. 数据全部来自 store，M1 换成真实查询时本文件不用动。
+ *
+ * **「网络小说」与「设置」入口暂不渲染**：前者整个模块是 M4 的占位（侧栏会显示
+ * fixture 假书源），后者是 ComingSoon 页（M5-01）。未实现的功能宁可不给入口，
+ * 也不要让用户点进去看到一句「敬请期待」；路由保留，手输 URL 仍可到达。
  */
 import { computed, ref } from 'vue'
 import AppIcon from '@/components/common/AppIcon.vue'
@@ -17,7 +21,6 @@ import ShelfNameDialog from '@/components/library/ShelfNameDialog.vue'
 import { pushToast } from '@/lib/toast'
 import { BOOK_MIME, SHELF_MIME, getDragSource, setDragSource } from '@/lib/drag'
 import { useLibraryStore } from '@/stores/library'
-import { fixtureSources } from '@/fixture/sources'
 import { useUiStore } from '@/stores/ui'
 
 const library = useLibraryStore()
@@ -167,45 +170,9 @@ function acceptDrag(event: DragEvent): boolean {
             还没有书架
           </p>
         </SidebarSection>
-
-        <SidebarSection
-          title="网络小说"
-          to="/sources"
-          nav="sources"
-          :open="ui.isSectionOpen('sources')"
-          @toggle="ui.toggleSection('sources')"
-        >
-          <RouterLink
-            v-for="source in fixtureSources"
-            :key="source.id"
-            :to="`/sources/${source.id}`"
-            class="ct-nav-item"
-            active-class="ct-nav-item-active"
-            data-source-item
-          >
-            <span
-              class="h-1.5 w-1.5 shrink-0 rounded-full"
-              :class="source.enabled ? 'bg-emerald-500/80' : 'bg-faint/50'"
-            />
-            <span class="flex-1 truncate">{{ source.name }}</span>
-          </RouterLink>
-
-          <p v-if="fixtureSources.length === 0" class="px-2 py-1 text-[11.5px] text-faint">
-            还没有导入书源
-          </p>
-        </SidebarSection>
       </div>
 
-      <div class="flex items-center gap-1 border-t border-line p-2.5">
-        <RouterLink
-          to="/settings"
-          class="ct-nav-item min-w-0 flex-1"
-          active-class="ct-nav-item-active"
-          data-nav="settings"
-        >
-          <AppIcon name="settings" :size="15" />
-          <span class="flex-1 truncate">设置</span>
-        </RouterLink>
+      <div class="flex items-center justify-end border-t border-line p-2.5">
         <button
           type="button"
           class="ct-icon-btn"
@@ -265,29 +232,9 @@ function acceptDrag(event: DragEvent): boolean {
         >
           <AppIcon name="folder" :size="16" />
         </RouterLink>
-        <RouterLink
-          to="/sources"
-          class="ct-rail-item"
-          active-class="ct-rail-item-active"
-          title="网络小说"
-          aria-label="网络小说"
-          data-nav="sources"
-        >
-          <AppIcon name="globe" :size="16" />
-        </RouterLink>
       </nav>
 
       <div class="mt-auto flex flex-col items-center gap-1 border-t border-line px-2 py-2.5">
-        <RouterLink
-          to="/settings"
-          class="ct-rail-item"
-          active-class="ct-rail-item-active"
-          title="设置"
-          aria-label="设置"
-          data-nav="settings"
-        >
-          <AppIcon name="settings" :size="16" />
-        </RouterLink>
         <button
           type="button"
           class="ct-rail-item"

@@ -77,11 +77,16 @@ const UI_CASES = String.raw`
       ['书库切换器', '[data-library-switcher]'],
       ['全部书籍', '[data-nav="library"]'],
       ['收藏的书籍', '[data-nav="favorites"]'],
-      ['我的书架', '[data-nav="shelves"]'],
-      ['网络小说', '[data-nav="sources"]']
+      ['我的书架', '[data-nav="shelves"]']
     ]
     const missing = entries.filter(([, sel]) => !q(sel)).map(([name]) => name)
-    push('五个入口齐全', missing.length === 0, missing.length ? '缺少 ' + missing.join('、') : '书库切换器 + 4 个入口')
+    push('入口齐全（已实现的三个）', missing.length === 0, missing.length ? '缺少 ' + missing.join('、') : '书库切换器 + 3 个入口')
+    // 未实现的入口不渲染：网络小说（M4 占位）与设置（M5 ComingSoon）
+    push(
+      '未实现入口已隐藏',
+      !q('[data-nav="sources"]') && !q('[data-nav="settings"]') && !q('[data-source-item]'),
+      'sources/settings 入口均不应出现'
+    )
 
     // M1-08 起列表是异步加载（IPC → SQL），计数要等到数据到位而不是元素出现
     const waitForCount = (expected) =>
@@ -133,17 +138,7 @@ const UI_CASES = String.raw`
     push('书架页标题是书架名', txt(q('[data-page-title]')) === '睡前读物', txt(q('[data-page-title]')))
     push('书架内含 4 本', (await waitForCount('4 本')) === '4 本', txt(q('[data-book-count]')))
 
-    // ---------------------------------------------------------------- 4. 网络小说
-    await click('[data-nav="sources"]')
-    checkRoute('/sources')
-    checkActive('网络小说')
-    push('书源列表 3 条', qa('[data-source-row]').length === 3, qa('[data-source-row]').length + ' 条')
-
-    await click('[data-source-row]')
-    checkRoute('/sources/src1')
-    checkActive('示例书源 A')
-
-    // ---------------------------------------------------------------- 5. 书库切换器
+    // ---------------------------------------------------------------- 4. 书库切换器
     await click('[data-nav="library"]')
     await click('[data-library-switcher]')
     push('切换器面板展开', !!q('[data-root-panel]'))
@@ -224,9 +219,10 @@ const UI_CASES = String.raw`
     const rail = q('[data-sidebar]')
     push('折叠后宽度 64px', rail && rail.getAttribute('data-collapsed') === '1' && rail.offsetWidth === 64, (rail ? rail.offsetWidth : 0) + 'px')
     push(
-      '折叠态四个入口仍在',
-      ['library', 'favorites', 'shelves', 'sources'].every((key) => !!q('[data-nav="' + key + '"]'))
+      '折叠态三个入口仍在',
+      ['library', 'favorites', 'shelves'].every((key) => !!q('[data-nav="' + key + '"]'))
     )
+    push('折叠态不出现未实现入口', !q('[data-nav="sources"]') && !q('[data-nav="settings"]'))
     await click('[data-nav="favorites"]')
     checkRoute('/favorites')
     checkActive('收藏的书籍')
