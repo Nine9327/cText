@@ -1,6 +1,6 @@
 """EPUB 解析（M1-05）：目录、元数据、内嵌封面。
 
-契约（`docs/产品文档.md` §3.5）：
+契约：
     parse.epub.toc   path → chapters[]（href + 层级）
     parse.meta       path, format → title, author, intro, coverPath, lang
     cover.extract    path, destDir → coverPath

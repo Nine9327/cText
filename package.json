@@ -3,8 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "description": "cText - 本地优先的 Windows 桌面小说阅读器",
-  "author": "cText",
-  "license": "UNLICENSED",
+  "author": "Nine9327",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Nine9327/cText.git"
+  },
+  "homepage": "https://github.com/Nine9327/cText#readme",
+  "bugs": {
+    "url": "https://github.com/Nine9327/cText/issues"
+  },
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "node scripts/dev.mjs",

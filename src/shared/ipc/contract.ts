@@ -1,10 +1,9 @@
 /**
- * IPC 契约（docs/产品文档.md §3.6 的落地版本）。
+ * IPC 契约：每个通道声明 `{ input, output }`。
  *
- * 相对文档的一处调整：文档把通道写成函数类型 `(q: BookQuery) => Promise<Paged<BookDTO>>`。
- * 这里改成 `{ input, output }` 结构——因为注册器与 preload 白名单需要**分别**取到入参和返回值
- * 类型，函数类型要靠 `Parameters<>[0]` 反解，遇到无入参通道（`() => void`）会取到 undefined 并使
- * 整个映射退化。信息量与文档完全一致。
+ * 为什么不是函数类型 `(q: BookQuery) => Promise<Paged<BookDTO>>`：注册器与 preload 白名单需要
+ * **分别**取到入参和返回值类型，函数类型要靠 `Parameters<>[0]` 反解，遇到无入参通道
+ * （`() => void`）会取到 undefined 并使整个映射退化。结构化的写法信息量相同且不会退化。
  *
  * 新增通道的顺序固定为：dto.ts 加类型 → 本文件加签名 → channels.ts 加通道名 →
  * schemas.ts 加 zod schema → main/ipc 注册 handler。五处缺一，编译期就会报错。

@@ -6,7 +6,7 @@
    M1-06 的并发 4 导入会常驻几十 MB，而实际只需要「清单 + 目录」两小段 XML。
 2. 它的失败一律抛 `BadZipFile` / `KeyError` 这类底层异常，无法区分
    「压缩包坏了」「不是 EPUB」「受 DRM 保护」——而产品要求导入结果面板
-   按原因分类展示（`docs/产品文档.md` §223）。
+   按原因分类展示。
 3. 字体混淆（Adobe / IDPF 两种算法）在正规出版 EPUB 里很常见且**不是 DRM**，
    ebooklib 不区分，我们必须在 `META-INF/encryption.xml` 里做这个判断。
 

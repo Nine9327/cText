@@ -7,7 +7,7 @@
  *   3. 两者都不适用：环境变量 CTEXT_WORKER_CMD / CTEXT_WORKER_ARGS 覆盖（自检与特殊环境用）
  *
  * 开发态必须用 .venv 而不是 PATH 上的 python——系统 Python 可能没有依赖，
- * 也可能被别的项目改过版本（项目约定见 docs/开发计划.md §3.1）。
+ * 也可能被别的项目改过版本。这是项目约定：解析侧只认仓库内的 .venv。
  */
 import { app } from 'electron'
 import { existsSync } from 'node:fs'

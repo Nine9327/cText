@@ -1,5 +1,5 @@
 /**
- * Python worker 的 NDJSON 帧协议（对应 docs/产品文档.md §3.5 的帧示例）。
+ * Python worker 的 NDJSON 帧协议。
  *
  * 规则（与 python/ctext_worker/rpc.py 一一对应）：
  *   - 一行一帧，UTF-8，分隔符固定 `\n`

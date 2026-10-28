@@ -1,6 +1,6 @@
 /**
  * M0-00 环境自检（Node 侧）。
- * 对齐 docs/开发计划.md M0-00 验收：Node 22 + pnpm、Python 3.11、VS Build Tools、electron 依赖编译通过。
+ * 对齐 M0-00 验收口径：Node 22 + pnpm、Python 3.11、VS Build Tools、electron 依赖编译通过。
  *
  * 注意：better-sqlite3 是针对 Electron ABI 编译的（NODE_MODULE_VERSION 128），
  * 在纯 Node 下加载会报 ABI 不匹配，属预期。此处只校验产物存在，
