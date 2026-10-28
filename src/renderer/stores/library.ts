@@ -12,7 +12,7 @@
  */
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import type { BookDTO, RootDTO, ShelfDTO } from '@shared/dto'
+import type { BookDTO, BookSort, RootDTO, ShelfDTO } from '@shared/dto'
 import { call, on } from '@/api/client'
 
 /** 「全部书库」是渲染层虚拟出来的入口，不对应任何 roots 行 */
@@ -51,6 +51,13 @@ export const useLibraryStore = defineStore('library', () => {
   const recent = ref<BookDTO[]>([])
 
   const domain = ref<LibraryDomain>({})
+
+  /**
+   * 排序偏好（M1-09）。5 种排序跨三个入口共享一份——在书架页选了「书名」，
+   * 回到书库页仍是「书名」，这是用户预期的「列表排序」而不是「某页的排序」。
+   * 目前只存在内存里（与三视图偏好同批，落 settings 表属 M5）。
+   */
+  const sort = ref<BookSort>({ field: 'createdAt', direction: 'desc' })
 
   /** 当前生效的根目录；「全部书库」时 rootId 传 undefined */
   const activeRoot = computed<RootView>(
@@ -109,7 +116,14 @@ export const useLibraryStore = defineStore('library', () => {
     loading.value = true
     loadError.value = null
     try {
-      const page = await call('books:list', { ...scope(), offset, limit: PAGE_SIZE })
+      // sort 必须脱掉响应式代理：Vue 的 Proxy 不能结构化克隆，跨 IPC 会抛
+      // "An object could not be cloned."，而错误只落到列表的 loadError 上
+      const page = await call('books:list', {
+        ...scope(),
+        sort: { field: sort.value.field, direction: sort.value.direction },
+        offset,
+        limit: PAGE_SIZE
+      })
       // 竞态保护：响应回来时域可能已经切走（快速连点根目录）。
       // 简单可靠的判据是「loaded 已经被本轮置位」之外的版本号——
       // 这里用 offset===0 整表替换 + 追加只发生在本轮域内，切域走 reload(0)
@@ -160,6 +174,14 @@ export const useLibraryStore = defineStore('library', () => {
     void reload()
   }
 
+  /** 排序切换：只重拉列表，不重建根目录/书架（它们与排序无关） */
+  function setSort(next: BookSort): void {
+    if (next.field === sort.value.field && next.direction === sort.value.direction) return
+    // 存普通对象：reactive 代理过不了结构化克隆（IPC 会报 "could not be cloned"）
+    sort.value = { field: next.field, direction: next.direction }
+    void loadPage(0)
+  }
+
   /** books 表有任何变化（导入完成 / 根目录上下线）后的统一刷新入口 */
   function refresh(): void {
     void reload()
@@ -184,6 +206,7 @@ export const useLibraryStore = defineStore('library', () => {
     activeRootOnline,
     books,
     booksTotal,
+    sort,
     loading,
     loaded,
     loadError,
@@ -195,6 +218,7 @@ export const useLibraryStore = defineStore('library', () => {
     refresh,
     selectRoot,
     setDomain,
+    setSort,
     rootCount,
     bindEvents
   }

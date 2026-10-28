@@ -36,7 +36,7 @@ const statusText = computed(() => {
 
 <template>
   <!-- 封面视图 -->
-  <button v-if="variant === 'grid'" class="group block w-full text-left">
+  <button v-if="variant === 'grid'" class="group block w-full text-left" :data-book-id="book.id">
     <div
       class="relative aspect-[3/4] overflow-hidden rounded-md shadow-[0_2px_10px_rgba(0,0,0,.45)] ring-1 ring-black/30 transition-transform duration-120 group-hover:-translate-y-0.5"
       :class="isOffline && 'opacity-45 saturate-0'"
@@ -75,6 +75,7 @@ const statusText = computed(() => {
   <!-- 详细视图 -->
   <button
     v-else-if="variant === 'detail'"
+    :data-book-id="book.id"
     class="group flex w-full items-start gap-3 rounded-lg border border-line bg-card p-3 text-left transition-colors duration-120 hover:border-line-strong hover:bg-hover"
   >
     <div
@@ -100,6 +101,7 @@ const statusText = computed(() => {
   <!-- 列表视图 -->
   <button
     v-else
+    :data-book-id="book.id"
     class="group flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors duration-120 hover:bg-hover"
   >
     <div

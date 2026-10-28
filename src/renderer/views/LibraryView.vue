@@ -19,6 +19,7 @@ import { useRoute } from 'vue-router'
 import AppIcon from '@/components/common/AppIcon.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import SegmentedControl from '@/components/common/SegmentedControl.vue'
+import SortMenu from '@/components/library/SortMenu.vue'
 import BookCard from '@/components/book/BookCard.vue'
 import { pushToast } from '@/lib/toast'
 import { useImportStore } from '@/stores/import'
@@ -181,6 +182,15 @@ onBeforeUnmount(() => {
 watch(viewMode, () => {
   requestAnimationFrame(measure)
 })
+
+// 换排序等于「按新顺序从第一本开始看」：滚动位置留在原处会落到新序列的中间
+watch(
+  () => `${library.sort.field}:${library.sort.direction}`,
+  () => {
+    if (scrollEl.value) scrollEl.value.scrollTop = 0
+    scrollTop.value = 0
+  }
+)
 </script>
 
 <template>
@@ -246,11 +256,7 @@ watch(viewMode, () => {
         <SegmentedControl v-model="viewMode" :options="viewOptions" />
 
         <div class="flex items-center gap-2">
-          <button class="ct-btn" title="排序（M1-09 实现）">
-            <AppIcon name="sort" :size="14" />
-            导入时间
-            <AppIcon name="chevron-down" :size="12" class="text-faint" />
-          </button>
+          <SortMenu />
 
           <div class="flex">
             <button class="ct-btn rounded-r-none" title="导入书籍" data-import-trigger @click="importBooks">

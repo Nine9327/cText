@@ -82,6 +82,11 @@ export interface BookDetailDTO extends BookDTO {
 
 export type BookSortField = 'lastReadAt' | 'title' | 'author' | 'progress' | 'createdAt'
 
+export interface BookSort {
+  field: BookSortField
+  direction: 'asc' | 'desc'
+}
+
 export interface BookQuery {
   /** 走 FTS5 匹配 title / author / series / intro */
   keyword?: string
@@ -92,7 +97,7 @@ export interface BookQuery {
   readState?: ReadState
   /** 默认 true：离线书仍列出并在 UI 标「离线」角标 */
   includeOffline?: boolean
-  sort?: { field: BookSortField; direction: 'asc' | 'desc' }
+  sort?: BookSort
   offset?: number
   limit?: number
 }

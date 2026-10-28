@@ -17,8 +17,8 @@ import { countBooks, getShelf, listBooks, listShelves, recentBooks } from '../db
 import { registerHandler } from './registry'
 
 export function registerBooksIpc(): void {
-  registerHandler('books:list', ({ rootId, favoritesOnly, shelfId, offset, limit }) => {
-    const { items, total } = listBooks(getDb(), { rootId, favoritesOnly, shelfId, offset, limit })
+  registerHandler('books:list', ({ rootId, favoritesOnly, shelfId, sort, offset, limit }) => {
+    const { items, total } = listBooks(getDb(), { rootId, favoritesOnly, shelfId, sort, offset, limit })
     const paged: Paged<BookDTO> = { items, total, offset, limit }
     return paged
   })

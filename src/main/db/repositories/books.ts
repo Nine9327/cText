@@ -12,7 +12,7 @@
  *   3. `chapters` 的主键是 `(book_id, idx)`，且 `ON DELETE CASCADE`。
  *      章节整批替换时先删后插，避免残留旧章节。
  */
-import type { BookFormat } from '@shared/dto'
+import type { BookFormat, BookSort, BookSortField } from '@shared/dto'
 import { getDb, type Db } from '../connection'
 import { ulid } from '../../utils/id'
 
@@ -225,14 +225,36 @@ export interface BookListQuery {
   rootId?: string
   favoritesOnly?: boolean
   shelfId?: string
+  /** 缺省 = 导入时间倒序 */
+  sort?: BookSort
   offset: number
   limit: number
 }
 
 /**
- * 书籍列表（SQL 分页下推）。排序固定「导入时间倒序」——ULID 的字典序即时间序，
- * id 后缀保证同毫秒插入的顺序稳定；五排序在 M1-09 扩展。
+ * 排序字段 → ORDER BY 表达式。**用映射表而不是拼输入**：列名只能来自这里，
+ * zod 的 enum 在 IPC 边界上已经挡了一层，这里是第二层（仓储也可能被内部直接调用）。
+ *
+ * 两处细节：
+ *   - `IS NULL` 前置让「没有值」（没读过 / 作者未知）恒排在后，否则 ASC 时
+ *     一屏全是空作者，用户找不到东西。它本身不带方向，默认 ASC（0 在前）。
+ *   - 末尾恒接 `books.id` 同向兜底：同毫秒插入 / 同名同作者时顺序稳定，
+ *     否则翻页会出现重复或漏项。
  */
+const ORDER_BY: Record<BookSortField, string> = {
+  createdAt: 'books.created_at',
+  lastReadAt: 'books.last_read_at IS NULL, books.last_read_at',
+  title: 'books.title COLLATE NOCASE',
+  author: 'books.author IS NULL, books.author COLLATE NOCASE',
+  progress: 'books.progress'
+}
+
+function orderByClause(sort: BookSort | undefined): string {
+  const field = sort && sort.field in ORDER_BY ? sort.field : 'createdAt'
+  const direction = sort?.direction === 'asc' ? 'ASC' : 'DESC'
+  return `${ORDER_BY[field]} ${direction}, books.id ${direction}`
+}
+
 export function listBooks(db: Db, query: BookListQuery): { items: import('@shared/dto').BookDTO[]; total: number } {
   const conditions: string[] = []
   const params: unknown[] = []
@@ -253,7 +275,7 @@ export function listBooks(db: Db, query: BookListQuery): { items: import('@share
     db.prepare(`SELECT COUNT(*) AS n FROM books WHERE deleted_at IS NULL${where}`).get(...params) as { n: number }
   )
   const rows = db
-    .prepare(`${BOOK_SELECT}${where} ORDER BY books.created_at DESC, books.id DESC LIMIT ? OFFSET ?`)
+    .prepare(`${BOOK_SELECT}${where} ORDER BY ${orderByClause(query.sort)} LIMIT ? OFFSET ?`)
     .all(...params, query.limit, query.offset) as BookRow[]
 
   return { items: rows.map(toBookDTO), total }

@@ -14,6 +14,7 @@ import type {
   BookDTO,
   BookDetailDTO,
   BookQuery,
+  BookSort,
   ChapterContentDTO,
   EchoRequest,
   EchoResponse,
@@ -70,9 +71,17 @@ export type IpcMap = {
   'shelves:addBooks': { input: { shelfId: string; bookIds: string[] }; output: void }
   'shelves:get': { input: { shelfId: string }; output: ShelfDTO | null }
 
-  // 书籍列表（M1-08）
+  // 书籍列表（M1-08，排序由 M1-09 扩展）
   'books:list': {
-    input: { rootId?: string; favoritesOnly?: boolean; shelfId?: string; offset: number; limit: number }
+    input: {
+      rootId?: string
+      favoritesOnly?: boolean
+      shelfId?: string
+      /** 缺省 = 导入时间倒序 */
+      sort?: BookSort
+      offset: number
+      limit: number
+    }
     output: Paged<BookDTO>
   }
   'books:count': { input: { rootId?: string; favoritesOnly?: boolean }; output: { total: number } }

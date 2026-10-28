@@ -57,11 +57,18 @@ export const ipcSchemas = {
   'import:commit': z.object({ path: pathSchema, options: importOptionsSchema }),
   'import:cancel': z.object({ taskId: idSchema }),
 
-  // 书籍列表（M1-08）
+  // 书籍列表（M1-08，排序 M1-09）
   'books:list': z.object({
     rootId: idSchema.optional(),
     favoritesOnly: z.boolean().optional(),
     shelfId: idSchema.optional(),
+    /** 字段用 allowlist：ORDER BY 的列名不能来自用户输入 */
+    sort: z
+      .object({
+        field: z.enum(['lastReadAt', 'title', 'author', 'progress', 'createdAt']),
+        direction: z.enum(['asc', 'desc'])
+      })
+      .optional(),
     offset: z.number().int().min(0).max(1_000_000),
     limit: z.number().int().min(1).max(2000)
   }),

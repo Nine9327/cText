@@ -157,6 +157,47 @@ const UI_CASES = String.raw`
     push('切回后恢复 16 本', (await waitForCount('16 本')) === '16 本', txt(q('[data-book-count]')))
     push('切回后最近阅读回来', !!q('[data-recent]'))
 
+    // ---------------------------------------------------------------- 5.5 排序（M1-09）
+    // fixture 的 16 本书里：书名升序首项 = 万历十五年（U+4E07 才是最小码点，
+    // 别按「三体」的直觉猜——三体的 U+4E09 比它大）、
+    // 作者升序首项 = 深入理解计算机系统（作者是 ASCII，排在所有中文之前）、
+    // 导入时间倒序首项 = 乡土中国（b16 的 created_at 最新）
+    const firstBookId = () => {
+      const el = q('[data-book-grid] [data-book-id]')
+      return el ? el.getAttribute('data-book-id') : ''
+    }
+    const sortBy = async (field) => {
+      await click('[data-sort-trigger]')
+      await click('[data-sort-field="' + field + '"]')
+      await sleep(120)
+    }
+    push('排序按钮默认「导入时间」', txt(q('[data-sort-label]')) === '导入时间', txt(q('[data-sort-label]')))
+    await click('[data-sort-trigger]')
+    push('排序面板列出 5 种排序', qa('[data-sort-option]').length === 5, qa('[data-sort-option]').length + ' 项')
+
+    await click('[data-sort-field="title"]')
+    push('选「书名」后面板关闭', !q('[data-sort-panel]'))
+    push('排序文案更新为书名', txt(q('[data-sort-label]')) === '书名', txt(q('[data-sort-label]')))
+    push(
+      '书名升序首项是「万历十五年」',
+      (await waitFor(() => (firstBookId() === 'b11' ? 'b11' : null), 6000)) === 'b11',
+      firstBookId()
+    )
+
+    await sortBy('author')
+    push(
+      '作者升序首项是「深入理解计算机系统」',
+      (await waitFor(() => (firstBookId() === 'b13' ? 'b13' : null), 6000)) === 'b13',
+      firstBookId()
+    )
+
+    await sortBy('createdAt')
+    push(
+      '切回导入时间后首项是最新导入的「乡土中国」',
+      (await waitFor(() => (firstBookId() === 'b16' ? 'b16' : null), 6000)) === 'b16',
+      firstBookId()
+    )
+
     // ---------------------------------------------------------------- 6. 分区折叠
     const shelfBody = () => q('[data-section="shelves"] [data-section-body]')
     await click('[data-section-toggle="shelves"]')
