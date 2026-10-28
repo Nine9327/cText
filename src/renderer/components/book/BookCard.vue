@@ -163,8 +163,10 @@ function onDragStart(event: DragEvent): void {
         </span>
       </div>
 
-      <p class="mt-2 line-clamp-2 text-[12.5px] leading-[1.45] text-ink/90 group-hover:text-ink">{{ book.title }}</p>
-      <p class="mt-0.5 text-[11px] text-faint">
+      <!-- 书名固定预留两行（36px）、状态固定 16px：虚拟列表按「每行等高」定位，
+           行高随内容浮动会让下一行盖住上一行的文字 -->
+      <p class="mt-2 line-clamp-2 h-[36px] text-[12.5px] leading-[18px] text-ink/90 group-hover:text-ink">{{ book.title }}</p>
+      <p class="mt-0.5 text-[11px] leading-4 text-faint">
         {{ statusText }}
       </p>
     </button>

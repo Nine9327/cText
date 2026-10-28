@@ -14,7 +14,7 @@
  * 数据分页：books:list 每页 120 本（SQL 下推），滚动接近底部时 loadMore
  * 追加。1 万本 = 84 页，预加载提前一屏半，滚动永不触顶等待。
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '@/components/common/AppIcon.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
@@ -439,7 +439,9 @@ const viewportH = ref(800)
 const viewportW = ref(1200)
 const listTop = ref(0)
 
-/** 三种视图的行几何：每行列数下限（列宽+列距）、行内容高、行距 */
+/** 三种视图的行几何：每行列数下限（列宽+列距）、行内容高（仅作首帧估算）、行距。
+ *  grid 的行内容高是「封面（aspect-3/4 随列宽变）+ 书名 36px + 状态 16px + 间距 10px」，
+ *  列宽随窗口变，所以 rowHeight 不能写死——首帧用估算，挂载后由 ResizeObserver 实测修正。 */
 const GEOMETRY = {
   grid: { min: 152, gap: 20, rowContent: 238, rowGap: 24 },
   detail: { min: 268, gap: 12, rowContent: 118, rowGap: 12 },
@@ -452,7 +454,29 @@ const columnCount = computed(() => {
   const width = (viewportW.value || 1000) - 48 // px-6 × 2
   return Math.max(1, Math.floor((width + gap) / (min + gap)))
 })
-const rowHeight = computed(() => geometry.value.rowContent + geometry.value.rowGap)
+
+/** grid 视图的首帧行高估算：列宽 × 4/3（封面）+ 卡片下方文字区 62px */
+const estimatedRowHeight = computed(() => {
+  if (viewMode.value !== 'grid') return geometry.value.rowContent
+  const width = (viewportW.value || 1000) - 48
+  const colW = (width - geometry.value.gap * (columnCount.value - 1)) / columnCount.value
+  return colW * (4 / 3) + 62
+})
+
+/** 实测行高：任何一行的真实渲染高度（卡片已强制等高）。null = 尚未实测，用估算值 */
+const measuredRowHeight = ref<number | null>(null)
+const rowHeight = computed(() => measuredRowHeight.value ?? estimatedRowHeight.value + geometry.value.rowGap)
+
+async function remeasureRow(): Promise<void> {
+  await nextTick()
+  const row = listEl.value?.querySelector<HTMLElement>('[data-virtual-row]')
+  const h = row?.firstElementChild instanceof HTMLElement ? row.firstElementChild.offsetHeight : 0
+  // 保留旧值直到测出新值：窗口拖动过程中行高不回退到估算，避免列表跳动
+  if (h > 0) measuredRowHeight.value = h
+}
+
+// 列数 / 视图 / 列宽 / 数据量变化都会改变行内容 → 重测。行高只影响定位，不影响行自身高度，无回环。
+watch([viewMode, columnCount, viewportW, () => library.books.length > 0], () => void remeasureRow(), { immediate: true })
 const rowCount = computed(() => Math.ceil(library.books.length / columnCount.value))
 
 const OVERSCAN = 4
@@ -722,6 +746,7 @@ watch(
           v-for="row in visibleRows"
           :key="row.index"
           class="absolute left-0 w-full"
+          data-virtual-row
           :style="{ transform: `translateY(${row.index * rowHeight}px)` }"
         >
           <div
