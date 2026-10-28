@@ -12,6 +12,7 @@ import { installIpc } from './ipc/registry'
 import { runIpcSmoke } from './ipc/smoke'
 import { registerRootsIpc } from './ipc/roots'
 import { registerBooksIpc } from './ipc/books'
+import { registerReaderIpc } from './ipc/reader'
 import { registerImportIpc } from './ipc/import'
 import { registerSystemIpc } from './ipc/system'
 import { attachWindowStateEvents, registerWindowIpc } from './ipc/window'
@@ -27,6 +28,7 @@ import { runUiSmoke } from './ui/smoke'
 import { seedUiFixture } from './ui/ui-fixture'
 import { runListSmoke } from './ui/list-smoke'
 import { runSearchSmoke } from './ui/search-smoke'
+import { runReaderSmoke } from './reader/smoke'
 import { runM1Smoke } from './milestone/m1-smoke'
 import { runImportUiSmoke } from './ui/import-ui-smoke'
 import {
@@ -268,6 +270,7 @@ if (!gotLock) {
     registerRootsIpc()
     registerBooksIpc()
     registerImportIpc()
+    registerReaderIpc()
     installIpc()
 
     // M0-03：数据库在窗口创建之前初始化，失败则不进入界面
@@ -355,6 +358,12 @@ if (!gotLock) {
     // M1-10 自检：搜索（FTS 前缀命中 / 索引同步 / 200ms 防抖 / 离线标注）
     if (!app.isPackaged && mainWindow && process.env['CTEXT_SEARCH_SMOKE'] === '1') {
       await runSearchSmoke(mainWindow)
+      return
+    }
+
+    // M2-01 自检：内容通路（TXT 字节区间读 / 编码 / 转义 / LRU / 预取 / 五类失败）
+    if (!app.isPackaged && mainWindow && process.env['CTEXT_READER_SMOKE'] === '1') {
+      await runReaderSmoke(mainWindow)
       return
     }
 

@@ -22,6 +22,15 @@ export const ERROR_CODES = {
   timeout: 'E_TIMEOUT',
   /** 文件能打开但内容坏了 / 加密 / 不是声明的那种格式（M1-05） */
   parseFailed: 'E_PARSE_FAILED',
+  /**
+   * 书籍所在的根目录当前离线（M2-01）。
+   *
+   * **只由主进程产生**，不经过 Python 桥——所以 `bridge/protocol.ts` 的
+   * KNOWN_CODES 里没有它（那里限制的是 worker 能回传哪些码）。
+   * 与 E_NOT_FOUND 分开是为了让阅读器能给不同提示：离线是「插上磁盘/重新指定目录」，
+   * 缺失是「文件被移动或删除了」。
+   */
+  rootOffline: 'E_ROOT_OFFLINE',
   /** 未预期异常，message 一律脱敏为通用文案 */
   internal: 'E_INTERNAL'
 } as const
@@ -46,6 +55,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, string> = {
   E_IO: '读写失败，请检查磁盘或权限',
   E_TIMEOUT: '操作超时，请稍后重试',
   E_PARSE_FAILED: '文件解析失败，可能已损坏或加密',
+  E_ROOT_OFFLINE: '书籍所在的目录当前不可用，连接磁盘或重新指定目录后即可继续阅读',
   E_INTERNAL: '内部错误，请查看日志'
 }
 
