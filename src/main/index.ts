@@ -37,6 +37,7 @@ import { runReaderUiSmoke } from './reader/ui-smoke'
 import { runSettingsSmoke } from './settings/smoke'
 import { runProgressSmoke } from './reader/progress-smoke'
 import { runM1Smoke } from './milestone/m1-smoke'
+import { runM2Smoke } from './milestone/m2-smoke'
 import { runImportUiSmoke } from './ui/import-ui-smoke'
 import {
   applyStartupSwitches,
@@ -372,6 +373,12 @@ if (!gotLock) {
     // M1-10 自检：搜索（FTS 前缀命中 / 索引同步 / 200ms 防抖 / 离线标注）
     if (!app.isPackaged && mainWindow && process.env['CTEXT_SEARCH_SMOKE'] === '1') {
       await runSearchSmoke(mainWindow)
+      return
+    }
+
+    // M2 出口验收：20MB 首屏 / 五套主题对比度 / 拔插硬盘后进度与书签无损
+    if (!app.isPackaged && mainWindow && process.env['CTEXT_M2_SMOKE'] === '1') {
+      await runM2Smoke(mainWindow, process.env['CTEXT_M2_DIR'] ?? '')
       return
     }
 

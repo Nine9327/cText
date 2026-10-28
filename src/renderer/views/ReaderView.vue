@@ -175,9 +175,19 @@ async function loadBook(): Promise<boolean> {
   }
 }
 
+/**
+ * 最近一次「想去的位置」。
+ *
+ * 不能直接用 `chapterIdx` / `entryOffset` 当恢复目标：它们在**成功之后**才更新，
+ * 而离线/缺失恰恰是失败——失败后这两个值还停在打开时的初始值（0 / 0），
+ * 于是「插回硬盘 → 重试」会把读者送回第 1 章，而不是他原来读到的位置。
+ */
+let lastTarget = { idx: 0, offset: 0 }
+
 async function loadChapter(idx: number, offset = 0): Promise<void> {
   if (idx < 0) return
   if (book.value && idx >= book.value.chapterCount) return
+  lastTarget = { idx, offset }
   cancelSave()
   pending.value = true
   chapterError.value = null
@@ -206,7 +216,7 @@ async function retry(): Promise<void> {
     chapterError.value = null
     // 离线态先让主进程复核一次根目录：用户刚插回硬盘时，这里应该直接成功
     if (panel?.icon === 'offline') await call('roots:check').catch(() => undefined)
-    await loadChapter(chapterIdx.value, entryOffset.value)
+    await loadChapter(lastTarget.idx, lastTarget.offset)
   }
 }
 
@@ -644,11 +654,26 @@ onBeforeUnmount(() => {
   themeQuery = null
 })
 
+/**
+ * URL 里的章号是「我要读哪一章」的唯一真相（目录跳转、分享链接、浏览器前进后退都走它）。
+ * 只有 `bookId` 变化才重挂组件，`?chapter=` 变化不会——所以必须单独监听，
+ * 否则「同一本书里换章号」的链接会静默无效。
+ */
+watch(
+  () => route.query['chapter'],
+  (value) => {
+    const idx = Number(value ?? 0)
+    if (!Number.isFinite(idx) || idx < 0 || idx === chapterIdx.value) return
+    void loadChapter(idx)
+  }
+)
+
 // 同一组件实例内切换书（书架里连点两本）时重新加载
 watch(bookId, async () => {
   book.value = null
   chapter.value = null
   chapterError.value = null
+  lastTarget = { idx: 0, offset: 0 }
   chapters.value = []
   chaptersLoaded = false
   tocOpen.value = false
