@@ -13,14 +13,15 @@
  * 只在 `!app.isPackaged && CTEXT_READER_UI_SMOKE=1` 时执行，
  * 样本目录由 `scripts/verify-reader-ui.mjs` 建好并通过 CTEXT_READER_UI_DIR 传入。
  */
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { app, type BrowserWindow } from 'electron'
+import { app, dialog, type BrowserWindow } from 'electron'
 import { getDb } from '../db/connection'
 import { coversDir } from '../ipc/import'
 import { getTaskSnapshot, startImport } from '../library/import-task'
 import { loadSettings } from '../db/repositories/settings'
 import { exportBookmarks, listBookmarks } from '../db/repositories/bookmarks'
+import { checkAllRoots } from '../library/roots-monitor'
 
 export interface Check {
   name: string
@@ -913,6 +914,118 @@ async function scenario(win: BrowserWindow, dir: string, check: CheckFn): Promis
   const restoredShortcut = (await run(win, `const el = q('[data-shortcut="reader.toc"]'); return el ? txt(el) : ''`)) as string
   check('重启后键位仍然生效', restoredShortcut === 'F2', restoredShortcut || '没有快捷键段')
   await run(win, `q('[data-settings-close]').click(); await sleep(200); return true`)
+
+  // ---------------------------------------------------------------- 异常态（M2-11）
+  // 这一段会真的挪文件/改目录名，放在最后，避免影响前面所有依赖样本目录的断言
+  if (thousand) {
+  /**
+   * 等阅读器真的就绪：没有异常面板、正文容器存在且有文字、标题是这本书。
+   * 注意别用「字数 > 10」当判据——千章样本的第 1 章是卷标题，正文只有「本卷共 300 章。」。
+   */
+  const waitReaderReady = async (): Promise<string | null> =>
+    waitUntil(async () => {
+      const raw = (await run(win, `
+        const panel = q('[data-reader-panel]')
+        const el = q('[data-scroll-content]') || q('[data-page-content]')
+        return JSON.stringify({
+          panel: !!panel,
+          text: el ? el.textContent.trim().length : 0,
+          title: txt(q('[data-reader-title]'))
+        })
+      `)) as string
+      const state = JSON.parse(raw) as { panel: boolean; text: number; title: string }
+      return !state.panel && state.text > 0 && state.title.includes('千章样本') ? state.title : null
+    }, 15_000)
+
+  /** 面板状态：标题 + 有哪些恢复按钮 */
+  const panelState = async (): Promise<{ title: string; root: boolean; file: boolean }> => {
+    const raw = (await run(win, `
+      const title = q('[data-empty-title]')
+      return JSON.stringify({
+        title: title ? txt(title) : '',
+        root: !!q('[data-reader-relocate-root]'),
+        file: !!q('[data-reader-relocate-file]')
+      })
+    `)) as string
+    return JSON.parse(raw) as { title: string; root: boolean; file: boolean }
+  }
+
+  // ① 文件被挪进子目录 → 「重新定位文件」
+  const movedDir = join(dir, 'moved')
+  mkdirSync(movedDir, { recursive: true })
+  renameSync(join(dir, '千章样本.txt'), join(movedDir, '千章样本.txt'))
+  await run(win, `location.hash = '#/library'; return true`)
+  await sleep(200)
+  await run(win, `location.hash = '#/reader/${thousand.id}'; return true`)
+  const missing = await waitUntil(async () => {
+    const state = await panelState()
+    return state.title.includes('找不到') ? state : null
+  }, 10_000)
+  check(
+    '文件被挪走后给出「重新定位文件」入口',
+    missing?.title.includes('找不到') === true && missing.file === true,
+    missing ? `面板「${missing.title}」file=${missing.file}` : '10s 内没出现缺失面板'
+  )
+
+  const originalDialog = dialog.showOpenDialog
+  // 顶掉文件夹选择框：无头环境点不了原生对话框。这里替换的是 Electron 的 API 本身，
+  // 渲染层拿到的仍然是「用户选了这个目录」的结果，链路其余部分都是真的
+  // 测试里只关心「返回一个目录」，重载签名不兼容是预期的
+  dialog.showOpenDialog = (async () => ({ canceled: false, filePaths: [dir] })) as typeof dialog.showOpenDialog
+  await run(win, `q('[data-reader-relocate-file]').click(); return true`)
+  const recovered = await waitReaderReady()
+  const relocatedRow = getDb()
+    .prepare('SELECT rel_path FROM books WHERE id = ?')
+    .get(thousand.id) as { rel_path: string }
+  check(
+    '重新定位后恢复阅读，且 rel_path 指向新位置',
+    !!recovered && relocatedRow.rel_path === 'moved/千章样本.txt',
+    `${recovered ? '已恢复阅读' : '正文没出来'} / rel_path=${relocatedRow.rel_path}`
+  )
+
+  // ② 根目录整体离线 → 「重新指定目录」，并且位置不丢
+  const beforeOffline = await readerTitle(win)
+  const offlineDir = `${dir}-offline`
+  renameSync(dir, offlineDir)
+  await checkAllRoots({ reason: 'manual' })
+  await run(win, `location.hash = '#/library'; return true`)
+  await sleep(200)
+  await run(win, `location.hash = '#/reader/${thousand.id}'; return true`)
+  const offline = await waitUntil(async () => {
+    const state = await panelState()
+    return state.title.includes('离线') ? state : null
+  }, 10_000)
+  check(
+    '根目录离线时给出「重新指定目录」入口',
+    offline?.title.includes('离线') === true && offline.root === true,
+    offline ? `面板「${offline.title}」root=${offline.root}` : '10s 内没出现离页面板'
+  )
+
+  // 目录改名回来（模拟插回硬盘），再点「重新指定目录」指回原路径
+  renameSync(offlineDir, dir)
+  dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [dir] })
+  await run(win, `q('[data-reader-relocate-root]').click(); return true`)
+  const backOnline = await waitReaderReady()
+  check(
+    '重新指定目录后恢复阅读，且位置与丢失前一致',
+    !!backOnline && backOnline === beforeOffline,
+    `恢复后「${backOnline ?? '空'}」/ 丢失前「${beforeOffline}」`
+  )
+
+  const rootRow = getDb()
+    .prepare('SELECT path, state FROM library_roots WHERE id = (SELECT root_id FROM books WHERE id = ?)')
+    .get(thousand.id) as { path: string; state: string }
+  check(
+    '根目录已指回原路径并恢复在线',
+    rootRow.state === 'online' && rootRow.path.toLowerCase() === dir.toLowerCase(),
+    `${rootRow.path} / ${rootRow.state}`
+  )
+
+  dialog.showOpenDialog = originalDialog
+
+  // 把挪走的文件放回去，保持样本目录可复现
+  renameSync(join(movedDir, '千章样本.txt'), join(dir, '千章样本.txt'))
+  }
 
   // ---------------------------------------------------------------- 退出
   await run(win, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await sleep(200); return true`)

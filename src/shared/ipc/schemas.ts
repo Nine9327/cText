@@ -78,6 +78,7 @@ export const ipcSchemas = {
     rootId: idSchema.optional(),
     favoritesOnly: z.boolean().optional()
   }),
+  'books:relocateFile': z.object({ bookId: idSchema, searchDir: pathSchema }),
   'books:recent': z.object({
     rootId: idSchema.optional(),
     limit: z.number().int().min(1).max(20).optional()

@@ -89,6 +89,12 @@ interface PanelError {
   desc: string
   /** 是否值得给「重试」按钮（书不存在这种重试也没用） */
   retryable: boolean
+  /**
+   * 除「重试」之外的恢复动作（M2-11）：
+   *   - root：根目录整体换了位置（拔了盘换了盘符）→ 重新指定目录
+   *   - file：根目录还在，但这本书的文件被挪走了 → 重新定位文件
+   */
+  action?: 'root' | 'file'
 }
 
 const bookError = ref<PanelError | null>(null)
@@ -123,15 +129,17 @@ function describe(err: unknown): PanelError {
       icon: 'offline',
       title: '书籍所在目录当前离线',
       desc: '插回移动硬盘或重新连接网络位置后再试。进度与书签都在本地保存，不会丢。',
-      retryable: true
+      retryable: true,
+      action: 'root'
     }
   }
   if (code === ERROR_CODES.notFound) {
     return {
       icon: 'warning',
       title: '找不到这本书的文件',
-      desc: '文件可能被移动、改名或删除了。把它放回原来的目录，或在设置里重新指定书库目录。',
-      retryable: true
+      desc: '文件可能被移动、改名或删除了。把它放回原来的目录，或指定一个目录让 cText 按文件名找回来。',
+      retryable: true,
+      action: 'file'
     }
   }
   if (code === ERROR_CODES.parseFailed) {
@@ -208,6 +216,52 @@ async function retry(): Promise<void> {
  * `atEnd` 只在「往回翻」时为真：从第 2 章第 1 页按 ← 应该落到第 1 章的**最后一页**，
  * 落到第 1 页的话读者要重新翻一遍整章才能回到原来的位置。
  */
+/**
+ * 根目录整体换了位置：选一个新目录，交给 `roots:relocate` 改掉根目录路径。
+ * 它会按旧的 rel_path 逐本探测，回来告诉用户「找到 N 本，缺 M 本」。
+ */
+async function relocateRoot(): Promise<void> {
+  const rootId = book.value?.rootId
+  if (!rootId) return
+  const picked = await call('import:pickFolder').catch(() => null)
+  if (!picked) return
+  try {
+    const result = await call('roots:relocate', { rootId, newPath: picked.path })
+    pushToast({
+      level: result.missing > 0 ? 'warn' : 'info',
+      message: `已重新指定目录：找到 ${result.matched} 本${result.missing > 0 ? `，缺 ${result.missing} 本` : ''}`
+    })
+  } catch (err) {
+    pushToast({ level: 'error', message: err instanceof Error ? err.message : '重新指定目录失败' })
+    return
+  }
+  await retry()
+}
+
+/** 单本书的文件被挪走：按文件名在新目录下找唯一匹配，改写 rel_path */
+async function relocateFile(): Promise<void> {
+  const picked = await call('import:pickFolder').catch(() => null)
+  if (!picked) return
+  try {
+    const result = await call('books:relocateFile', { bookId: bookId.value, searchDir: picked.path })
+    if (!result.relPath) {
+      pushToast({
+        level: 'warn',
+        message:
+          result.candidates > 1
+            ? `找到 ${result.candidates} 个同名文件，无法确定是哪一本`
+            : '没找到同名文件，换一个目录再试'
+      })
+      return
+    }
+    pushToast({ level: 'info', message: '已重新定位到新位置' })
+  } catch (err) {
+    pushToast({ level: 'error', message: err instanceof Error ? err.message : '重新定位失败' })
+    return
+  }
+  await retry()
+}
+
 function goChapter(idx: number, atEnd = false): void {
   if (idx < 0) return
   if (book.value && idx >= book.value.chapterCount) return
@@ -730,7 +784,23 @@ watch(bookId, async () => {
           :title="(chapterError ?? bookError)!.title"
           :desc="(chapterError ?? bookError)!.desc"
         >
-          <div class="mt-1 flex items-center gap-2">
+          <div class="mt-1 flex flex-wrap items-center justify-center gap-2">
+            <button
+              v-if="(chapterError ?? bookError)!.action === 'root'"
+              class="ct-btn"
+              data-reader-relocate-root
+              @click="relocateRoot"
+            >
+              重新指定目录
+            </button>
+            <button
+              v-if="(chapterError ?? bookError)!.action === 'file'"
+              class="ct-btn"
+              data-reader-relocate-file
+              @click="relocateFile"
+            >
+              重新定位文件
+            </button>
             <button v-if="(chapterError ?? bookError)!.retryable" class="ct-btn" data-reader-retry @click="retry">
               重试
             </button>

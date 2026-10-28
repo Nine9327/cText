@@ -90,6 +90,14 @@ export type IpcMap = {
   }
   'books:count': { input: { rootId?: string; favoritesOnly?: boolean }; output: { total: number } }
   'books:recent': { input: { rootId?: string; limit?: number }; output: BookDTO[] }
+  /**
+   * 文件重定位（M2-11）：在 `searchDir` 下按文件名找唯一匹配，改写 rel_path。
+   * `relPath` 为 null 表示没找到或不唯一（`candidates` 说明找到了几个）。
+   */
+  'books:relocateFile': {
+    input: { bookId: string; searchDir: string }
+    output: { relPath: string | null; candidates: number }
+  }
 
   // 导入
   'import:pickFolder': { input: void; output: { path: string } | null }

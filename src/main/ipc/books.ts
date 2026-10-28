@@ -14,6 +14,7 @@
 import type { BookDTO, Paged, ShelfDTO } from '@shared/dto'
 import { getDb } from '../db/connection'
 import { countBooks, getBookDetail, getShelf, listBooks, listShelves, recentBooks } from '../db/repositories/books'
+import { relocateBookFile } from '../library/relocate'
 import { registerHandler } from './registry'
 
 /**
@@ -35,6 +36,11 @@ export function registerBooksIpc(): void {
   // 单本详情：阅读器进门第一件事（书名、章数、离线态）。返回 null 表示书不存在，
   // 由渲染层渲染「书不见了」而不是把它当错误——用户点开一个被删掉的书不该看到报错弹窗
   registerHandler('library:get', ({ id }) => getBookDetail(getDb(), id))
+
+  // 文件重定位（M2-11）：书挪了位置但根目录还在时，按文件名找回来
+  registerHandler('books:relocateFile', ({ bookId, searchDir }) =>
+    relocateBookFile(getDb(), bookId, searchDir)
+  )
 
   registerHandler('books:list', ({ rootId, favoritesOnly, shelfId, keyword, sort, offset, limit }) => {
     if (process.env['CTEXT_SEARCH_SMOKE'] === '1' && keyword) {
