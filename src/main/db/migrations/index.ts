@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3'
 import { existsSync, renameSync } from 'node:fs'
 import initialSql from './001_initial.sql?raw'
+import bookmarkRangeSql from './002_bookmark_range.sql?raw'
 
 /**
  * 版本化迁移。
@@ -17,7 +18,10 @@ export interface Migration {
   sql: string
 }
 
-export const migrations: readonly Migration[] = [{ version: 1, name: 'initial', sql: initialSql }]
+export const migrations: readonly Migration[] = [
+  { version: 1, name: 'initial', sql: initialSql },
+  { version: 2, name: 'bookmark-range', sql: bookmarkRangeSql }
+]
 
 export const LATEST_VERSION = migrations[migrations.length - 1]!.version
 
@@ -73,14 +77,21 @@ export function ensureCompatibleDatabase(file: string): string | null {
   let from: number
   try {
     from = probe.pragma('user_version', { simple: true }) as number
-    if (from === 0 || from < LATEST_VERSION) return null // 新库 / 正常升级路径
+    if (from === 0) return null // 空文件/新库
     if (from > LATEST_VERSION) {
       throw new Error(
         `数据库来自更新的版本（user_version=${from} > 应用支持的 ${LATEST_VERSION}），请升级应用后再打开`
       )
     }
 
-    // 版本号吻合：必须确认 schema 真的是这一代的
+    /*
+     * **只要不是空库就要验探针表**，不能只在「版本号恰好等于最新」时才验。
+     *
+     * 这一条是加 002 迁移时踩出来的：一个异物库 user_version=1，比当时的
+     * 最新版（2）小，于是走进「正常升级路径」，002 的 ALTER TABLE bookmarks
+     * 直接在启动时炸掉，整个应用打不开。正常升级的库从 001 起就带着这些表，
+     * 所以「缺表」只可能意味着它不是 cText 的库。
+     */
     const tables = new Set(
       (probe.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map(
         (row) => row.name

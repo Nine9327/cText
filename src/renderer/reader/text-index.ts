@@ -86,6 +86,31 @@ export class TextIndex {
     return lo
   }
 
+  /**
+   * (DOM 节点, 节点内下标) → 章内字符偏移。取选区端点用。
+   *
+   * 选区端点常常落在**元素**上（拖到段落边界时 `anchorNode` 是 `<p>` 而不是文本节点），
+   * 所以要能下探到那个位置之后的第一个文本节点；找不到返回 -1，调用方当作「无选区」。
+   */
+  offsetAt(node: Node, local: number): number {
+    const resolved = this.resolveText(node, local)
+    if (!resolved) return -1
+    const span = this.spans.find((item) => item.node === resolved.node)
+    if (!span) return -1
+    return span.start + Math.min(resolved.local, resolved.node.data.length)
+  }
+
+  private resolveText(node: Node, local: number): { node: Text; local: number } | null {
+    if (node.nodeType === Node.TEXT_NODE) return { node: node as Text, local }
+    const children = node.childNodes
+    if (children.length === 0) return null
+    const start = children[Math.min(Math.max(0, local), children.length - 1)]!
+    if (start.nodeType === Node.TEXT_NODE) return { node: start as Text, local: 0 }
+    const walker = document.createTreeWalker(start, NodeFilter.SHOW_TEXT)
+    const first = walker.nextNode() as Text | null
+    return first ? { node: first, local: 0 } : null
+  }
+
   /** 偏移 → (文本节点, 节点内下标) */
   private locate(offset: number): { node: Text; local: number } | null {
     if (this.spans.length === 0) return null

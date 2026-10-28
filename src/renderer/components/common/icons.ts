@@ -25,9 +25,11 @@ export type IconName =
   | 'maximize'
   | 'restore'
   | 'close'
+  | 'bookmark'
 
 export const iconPaths: Record<IconName, string> = {
   book: 'M6.5 3H19v18H6.5A2.5 2.5 0 0 1 4 18.5v-13A2.5 2.5 0 0 1 6.5 3ZM4 18.5A2.5 2.5 0 0 1 6.5 16H19',
+  bookmark: 'M7 3.5h10a1 1 0 0 1 1 1V21l-6-4.4L6 21V4.5a1 1 0 0 1 1-1Z',
   star: 'M12 3.2 14.9 9l6.4.9-4.6 4.5 1.1 6.4L12 17.8 6.2 20.8l1.1-6.4L2.7 9.9 9.1 9 12 3.2Z',
   folder:
     'M4 20h16a1.6 1.6 0 0 0 1.6-1.6V8.4A1.6 1.6 0 0 0 20 6.8h-8l-1.6-2.2A1.6 1.6 0 0 0 9.1 4H4a1.6 1.6 0 0 0-1.6 1.6v12.8A1.6 1.6 0 0 0 4 20Z',

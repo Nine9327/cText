@@ -37,6 +37,11 @@ export class ScrollPositioner {
     return this.index.total
   }
 
+  /** 字符索引（划线要把选区端点换算成偏移，读它） */
+  get textIndex(): TextIndex {
+    return this.index
+  }
+
   get scrollTop(): number {
     return this.viewport.scrollTop
   }

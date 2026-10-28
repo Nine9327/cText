@@ -92,6 +92,11 @@ export class Paginator {
     return this.box
   }
 
+  /** 字符索引（划线要把选区端点换算成偏移，读它） */
+  get textIndex(): TextIndex {
+    return this.index
+  }
+
   /** 翻一页的位移 = 一页的栏数 × (栏宽 + 间距) */
   get step(): number {
     return COLUMNS_PER_PAGE * (this.box.width + this.box.gap)

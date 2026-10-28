@@ -12,6 +12,7 @@
 import type {
   AppInfoDTO,
   BookDTO,
+  BookmarkDTO,
   BookDetailDTO,
   BookQuery,
   BookSort,
@@ -103,6 +104,25 @@ export type IpcMap = {
   'reader:saveProgress': { input: ProgressDTO; output: void }
   /** 读进度（M2-08）。没读过返回 null，由渲染层决定从第 0 章开始 */
   'reader:progress': { input: { bookId: string }; output: ProgressDTO | null }
+
+  // 书签与划线（M2-09）
+  'bookmarks:list': { input: { bookId: string }; output: BookmarkDTO[] }
+  'bookmarks:add': {
+    input: {
+      bookId: string
+      chapterIdx: number
+      offset: number
+      endOffset: number | null
+      kind: 'bookmark' | 'highlight'
+      text: string | null
+      note?: string | null
+    }
+    output: BookmarkDTO
+  }
+  'bookmarks:updateNote': { input: { id: string; note: string | null }; output: void }
+  'bookmarks:remove': { input: { id: string }; output: void }
+  /** 导出为 Markdown。`path` 为空时由主进程弹保存框（自动化验收会直接给路径） */
+  'bookmarks:export': { input: { bookId: string; path: string | null }; output: { path: string } | null }
 
   // 书源
   'source:import': { input: { json: string } | { filePath: string }; output: SourceImportResultDTO }

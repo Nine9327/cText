@@ -12,6 +12,8 @@
  */
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ScrollPositioner, type ScrollResult, type ScrollSnapshot } from '@/reader/scroll'
+import { applyHighlights, clearHighlights, readHighlights, type HighlightRange } from '@/reader/highlight'
+import type { TextSelection } from '@/components/reader/PagedView.vue'
 import type { ReaderTypography } from '@/stores/reader'
 
 const props = withDefaults(
@@ -20,11 +22,16 @@ const props = withDefaults(
     typography: ReaderTypography
     /** 进入时的章内字符偏移；-1 表示从章末开始 */
     startOffset?: number
+    /** 本章划线（M2-09） */
+    highlights?: HighlightRange[]
   }>(),
-  { startOffset: 0 }
+  { startOffset: 0, highlights: () => [] }
 )
 
-const emit = defineEmits<{ (e: 'progress', snap: ScrollSnapshot): void }>()
+const emit = defineEmits<{
+  (e: 'progress', snap: ScrollSnapshot): void
+  (e: 'select', selection: TextSelection | null): void
+}>()
 
 const viewport = ref<HTMLDivElement>()
 const content = ref<HTMLDivElement>()
@@ -66,8 +73,26 @@ watch(
     if (!positioner) return
     positioner.syncDom()
     positioner.scrollToOffset(anchorOf(props.startOffset))
+    applyMarks()
     publish()
   }
+)
+
+/** 见 PagedView 的同名函数：先拆旧 mark → 套新 mark → 重建索引（mark 不影响排版） */
+function applyMarks(): void {
+  const element = content.value
+  if (!element || !positioner) return
+  clearHighlights(element)
+  if (props.highlights && props.highlights.length > 0) {
+    applyHighlights(element, positioner.textIndex, props.highlights)
+  }
+  positioner.syncDom()
+}
+
+watch(
+  () => props.highlights,
+  () => applyMarks(),
+  { deep: true }
 )
 
 watch(
@@ -88,8 +113,10 @@ onMounted(() => {
   positioner = new ScrollPositioner(viewport.value, content.value)
   positioner.syncDom()
   positioner.scrollToOffset(anchorOf(props.startOffset))
+  applyMarks()
   publish()
 
+  content.value.addEventListener('mouseup', onMouseUp)
   observer = new ResizeObserver(() => {
     positioner?.restore()
     publish()
@@ -111,9 +138,33 @@ onBeforeUnmount(() => {
   observer?.disconnect()
   observer = null
   content.value?.removeEventListener('load', onAssetLoad, true)
+  content.value?.removeEventListener('mouseup', onMouseUp)
   positioner = null
   delete (window as { __ctextScroll?: unknown }).__ctextScroll
 })
+
+/** 选区 → 章内字符偏移（与 PagedView 同一套换算） */
+function onMouseUp(): void {
+  const selection = window.getSelection()
+  const element = content.value
+  if (!positioner || !element) return
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+    emit('select', null)
+    return
+  }
+  const range = selection.getRangeAt(0)
+  if (!element.contains(range.commonAncestorContainer)) {
+    emit('select', null)
+    return
+  }
+  const offset = positioner.textIndex.offsetAt(range.startContainer, range.startOffset)
+  const endOffset = positioner.textIndex.offsetAt(range.endContainer, range.endOffset)
+  if (offset < 0 || endOffset < 0 || endOffset <= offset) {
+    emit('select', null)
+    return
+  }
+  emit('select', { offset, endOffset, text: range.toString() })
+}
 
 // ---------------------------------------------------------------- 对外接口
 
@@ -147,6 +198,7 @@ function installProbe(): void {
     offsetAtTop: () => positioner?.offsetAtTop() ?? 0,
     total: () => positioner?.total ?? 0,
     scrollTop: () => positioner?.scrollTop ?? 0,
+    marks: () => (content.value ? readHighlights(content.value) : []),
     upToOffset: (offset: number) => positioner?.scrollToOffset(offset)
   }
 }

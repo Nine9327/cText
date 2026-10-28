@@ -50,6 +50,11 @@ export const INVOKE_CHANNELS = defineChannels<IpcChannel>()([
   'reader:content',
   'reader:chapters',
   'reader:progress',
+  'bookmarks:list',
+  'bookmarks:add',
+  'bookmarks:updateNote',
+  'bookmarks:remove',
+  'bookmarks:export',
   'reader:saveProgress',
 
   'source:import',

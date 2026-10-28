@@ -12,7 +12,14 @@
  */
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Paginator, type PageSnapshot } from '@/reader/paginate'
+import { applyHighlights, clearHighlights, readHighlights, type HighlightRange } from '@/reader/highlight'
 import type { ReaderTypography } from '@/stores/reader'
+
+export interface TextSelection {
+  offset: number
+  endOffset: number
+  text: string
+}
 
 const props = withDefaults(
   defineProps<{
@@ -23,11 +30,17 @@ const props = withDefaults(
      * 其余值按字符偏移处理，越界会被夹到 [0, 总字数-1]。
      */
     startOffset?: number
+    /** 本章划线（M2-09）。只在区间内套 mark，不改变排版 */
+    highlights?: HighlightRange[]
   }>(),
-  { startOffset: 0 }
+  { startOffset: 0, highlights: () => [] }
 )
 
-const emit = defineEmits<{ (e: 'page-change', snap: PageSnapshot): void }>()
+const emit = defineEmits<{
+  (e: 'page-change', snap: PageSnapshot): void
+  /** 选区变化（null = 没有有效选区） */
+  (e: 'select', selection: TextSelection | null): void
+}>()
 
 const viewport = ref<HTMLDivElement>()
 const content = ref<HTMLDivElement>()
@@ -64,9 +77,27 @@ watch(
     if (!paginator) return
     paginator.syncDom()
     paginator.paginate(anchorOf(props.startOffset))
+    applyMarks()
     publish()
   }
 )
+
+/**
+ * 把本章的划线套到 DOM 上。
+ *
+ * 顺序很重要：先拆旧的 → 套新的 → **重建字符索引**（`<mark>` 会切分文本节点，
+ * 索引里的节点引用全部失效）。索引重建只更新节点映射，不改变排版，所以
+ * 不需要重新分页——否则每加一条划线都会把读者弹回页首。
+ */
+function applyMarks(): void {
+  const element = content.value
+  if (!element || !paginator) return
+  clearHighlights(element)
+  if (props.highlights && props.highlights.length > 0) {
+    applyHighlights(element, paginator.textIndex, props.highlights)
+  }
+  paginator.syncDom()
+}
 
 /** -1（章末）→ 一个必定被夹到末字符的偏移 */
 function anchorOf(start: number): number {
@@ -76,13 +107,22 @@ function anchorOf(start: number): number {
 // 改字号/行距/页边距：DOM 没变，字符索引照旧可用，沿用当前页首字符偏移复原
 watch(() => props.typography, scheduleReflow, { deep: true })
 
+// 划线变化：只重画 mark，不重排（mark 无内外边距，不影响分页）
+watch(
+  () => props.highlights,
+  () => applyMarks(),
+  { deep: true }
+)
+
 onMounted(() => {
   if (!viewport.value || !content.value) return
   paginator = new Paginator(viewport.value, content.value)
   paginator.syncDom()
   paginator.paginate(anchorOf(props.startOffset))
+  applyMarks()
   publish()
 
+  content.value.addEventListener('mouseup', onMouseUp)
   observer = new ResizeObserver(() => scheduleReflow())
   observer.observe(viewport.value)
 
@@ -105,10 +145,40 @@ onBeforeUnmount(() => {
   observer?.disconnect()
   observer = null
   content.value?.removeEventListener('load', onAssetLoad, true)
+  content.value?.removeEventListener('mouseup', onMouseUp)
   paginator?.destroy()
   paginator = null
   delete (window as { __ctextReader?: unknown }).__ctextReader
 })
+
+/**
+ * 取选区并换算成字符偏移。
+ *
+ * 注意 `range.toString()` 只拼接文本节点、不插分隔符，所以它与
+ * `textContent.slice(start, end)` 是同一段字符串——这条等式也是验收里
+ * 「划线文字与实际正文一致」的判据。
+ */
+function onMouseUp(): void {
+  const selection = window.getSelection()
+  const element = content.value
+  if (!paginator || !element) return
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+    emit('select', null)
+    return
+  }
+  const range = selection.getRangeAt(0)
+  if (!element.contains(range.commonAncestorContainer)) {
+    emit('select', null)
+    return
+  }
+  const offset = paginator.textIndex.offsetAt(range.startContainer, range.startOffset)
+  const endOffset = paginator.textIndex.offsetAt(range.endContainer, range.endOffset)
+  if (offset < 0 || endOffset < 0 || endOffset <= offset) {
+    emit('select', null)
+    return
+  }
+  emit('select', { offset, endOffset, text: range.toString() })
+}
 
 // ---------------------------------------------------------------- 对外接口
 
@@ -163,6 +233,7 @@ function installProbe(): void {
     total: () => paginator?.totalChars ?? 0,
     geometry: () => (paginator ? { ...paginator.geometry } : null),
     offsetAtPage: (page: number) => (paginator ? paginator.offsetAtPage(page) : -1),
+    marks: () => (content.value ? readHighlights(content.value) : []),
     pageOfOffset: (offset: number) => (paginator ? paginator.pageOfOffset(offset) : -1),
     /**
      * 改一次字号并返回这次**真实重排**的耗时（ms）——验收里的「3000 字重排 <16ms」量这个。

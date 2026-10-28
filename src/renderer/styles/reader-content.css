@@ -81,3 +81,21 @@
 .ct-reader-content > :first-child {
   margin-top: 0;
 }
+
+/*
+ * 划线（M2-09）。
+ *
+ * **只改背景色，不加内外边距**：一旦改变行盒尺寸，分页引擎算出的列宽/页数就作废，
+ * 划一条线会让整章重新分页——读者正在看的那一页会跳走。
+ */
+.ct-reader-content mark.ct-hl {
+  background: rgb(242 210 100 / 0.45);
+  color: inherit;
+  border-radius: 2px;
+  box-decoration-break: clone;
+}
+
+/* 夜间主题下黄色底会压住浅色文字，换成更暗的琥珀底 */
+[data-reader-theme='night'] .ct-reader-content mark.ct-hl {
+  background: rgb(242 190 80 / 0.28);
+}

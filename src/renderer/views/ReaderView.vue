@@ -20,10 +20,13 @@ import PagedView from '@/components/reader/PagedView.vue'
 import ScrollView from '@/components/reader/ScrollView.vue'
 import TocDrawer from '@/components/reader/TocDrawer.vue'
 import SettingsPanel from '@/components/reader/SettingsPanel.vue'
+import NotesPanel from '@/components/reader/NotesPanel.vue'
 import type { IconName } from '@/components/common/icons'
 import { call } from '@/api'
+import { pushToast } from '@/lib/toast'
 import { ERROR_CODES } from '@shared/errors'
-import type { BookDetailDTO, ChapterContentDTO, ChapterDTO, ProgressDTO } from '@shared/dto'
+import type { BookDetailDTO, BookmarkDTO, ChapterContentDTO, ChapterDTO, ProgressDTO } from '@shared/dto'
+import type { TextSelection } from '@/components/reader/PagedView.vue'
 import type { PageSnapshot } from '@/reader/paginate'
 import type { ScrollSnapshot } from '@/reader/scroll'
 import { useReaderStore, type ReaderMode } from '@/stores/reader'
@@ -55,6 +58,18 @@ const pending = ref(false)
 const chapters = ref<ChapterDTO[]>([])
 const tocOpen = ref(false)
 const settingsOpen = ref(false)
+/** 书签与划线（M2-09） */
+const bookmarks = ref<BookmarkDTO[]>([])
+const notesOpen = ref(false)
+const exporting = ref(false)
+const selection = ref<TextSelection | null>(null)
+
+/** 当前章的划线区间：交给视图套 <mark> */
+const chapterHighlights = computed(() =>
+  bookmarks.value
+    .filter((item) => item.chapterIdx === chapterIdx.value && item.kind === 'highlight' && item.endOffset !== null)
+    .map((item) => ({ id: item.id, offset: item.offset, endOffset: item.endOffset }))
+)
 let chaptersLoaded = false
 
 /**
@@ -195,6 +210,102 @@ function goChapter(idx: number, atEnd = false): void {
   if (idx < 0) return
   if (book.value && idx >= book.value.chapterCount) return
   void loadChapter(idx, atEnd ? -1 : 0)
+}
+
+// ---------------------------------------------------------------- 书签与笔记（M2-09）
+
+async function loadBookmarks(): Promise<void> {
+  try {
+    bookmarks.value = await call('bookmarks:list', { bookId: bookId.value })
+  } catch {
+    bookmarks.value = []
+  }
+}
+
+function clearSelection(): void {
+  selection.value = null
+  window.getSelection()?.removeAllRanges()
+}
+
+/**
+ * 划线。
+ *
+ * 位置存的是「起点 + 终点」两个字符偏移，并且**把选中的文字一起存下来**：
+ * 后者不是位置的一部分，而是给人看的（列表里要展示摘录），也是划线画错位置时
+ * 唯一能拿来比对的证据。
+ */
+async function addHighlight(withNote = false): Promise<void> {
+  const picked = selection.value
+  if (!picked || !chapter.value) return
+  try {
+    const created = await call('bookmarks:add', {
+      bookId: bookId.value,
+      chapterIdx: chapterIdx.value,
+      offset: picked.offset,
+      endOffset: picked.endOffset,
+      kind: 'highlight',
+      text: picked.text
+    })
+    if (!bookmarks.value.some((item) => item.id === created.id)) bookmarks.value.push(created)
+    clearSelection()
+    if (withNote) notesOpen.value = true
+  } catch {
+    // 失败时保留选区，用户可以重试
+  }
+}
+
+/** 当前位置加纯书签（没有选区时用，Ctrl+D） */
+async function addBookmarkHere(): Promise<void> {
+  if (!chapter.value) return
+  try {
+    const created = await call('bookmarks:add', {
+      bookId: bookId.value,
+      chapterIdx: chapterIdx.value,
+      offset: position.value.offset,
+      endOffset: null,
+      kind: 'bookmark',
+      text: null
+    })
+    if (!bookmarks.value.some((item) => item.id === created.id)) bookmarks.value.push(created)
+    notesOpen.value = true
+  } catch {
+    // 忽略：书签失败不该打断阅读
+  }
+}
+
+async function saveNote(id: string, note: string | null): Promise<void> {
+  await call('bookmarks:updateNote', { id, note }).catch(() => undefined)
+  const target = bookmarks.value.find((item) => item.id === id)
+  if (target) target.note = note
+}
+
+async function removeNote(id: string): Promise<void> {
+  await call('bookmarks:remove', { id }).catch(() => undefined)
+  bookmarks.value = bookmarks.value.filter((item) => item.id !== id)
+}
+
+function jumpToNote(item: BookmarkDTO): void {
+  notesOpen.value = false
+  if (item.chapterIdx === chapterIdx.value) {
+    // 同一章：直接按偏移重排，不重新拉正文（省一次 IPC，也不闪）
+    entryOffset.value = item.offset
+    void loadChapter(item.chapterIdx, item.offset)
+    return
+  }
+  void loadChapter(item.chapterIdx, item.offset)
+}
+
+async function exportNotes(): Promise<void> {
+  if (exporting.value) return
+  exporting.value = true
+  try {
+    const saved = await call('bookmarks:export', { bookId: bookId.value, path: null })
+    if (saved) pushToast({ level: 'info', message: `已导出到 ${saved.path}` })
+  } catch {
+    pushToast({ level: 'error', message: '导出失败' })
+  } finally {
+    exporting.value = false
+  }
 }
 
 // ---------------------------------------------------------------- 进度（M2-08）
@@ -345,6 +456,12 @@ function onKeydown(event: KeyboardEvent): void {
     return
   }
 
+  if (event.ctrlKey && (event.key === 'd' || event.key === 'D')) {
+    event.preventDefault()
+    void addBookmarkHere()
+    return
+  }
+
   switch (event.key) {
     case 'ArrowRight':
     case 'PageDown':
@@ -371,7 +488,8 @@ function onKeydown(event: KeyboardEvent): void {
     case 'Escape':
       event.preventDefault()
       // 浮层开着时 Esc 只关浮层：读者的意图是「退出目录/面板」，不是「退出阅读」
-      if (settingsOpen.value) settingsOpen.value = false
+      if (notesOpen.value) notesOpen.value = false
+      else if (settingsOpen.value) settingsOpen.value = false
       else if (tocOpen.value) tocOpen.value = false
       else void router.push('/library')
       break
@@ -395,6 +513,7 @@ onMounted(async () => {
   // 先把设置读回来再渲染正文：否则会先用默认字号排一次版，再跳成用户的字号
   await reader.load()
   if (!(await loadBook())) return
+  await loadBookmarks()
   if (!book.value || book.value.chapterCount <= 0) {
     // 空文件 / 解析出 0 章的样本：留在骨架上等一个永远不来的正文最难排查
     chapterError.value = {
@@ -443,12 +562,20 @@ watch(bookId, async () => {
   chaptersLoaded = false
   tocOpen.value = false
   settingsOpen.value = false
+  notesOpen.value = false
+  bookmarks.value = []
+  selection.value = null
   if (await loadBook()) await loadChapter(0)
 })
 </script>
 
 <template>
-  <div class="relative flex h-full min-h-0 flex-col bg-app" data-reader :data-reader-mode="mode">
+  <div
+    class="relative flex h-full min-h-0 flex-col bg-app"
+    data-reader
+    :data-reader-mode="mode"
+    :data-reader-theme="reader.theme"
+  >
     <!-- 顶栏：返回 / 书名 · 章名 / 页码 / 字号 -->
     <header class="flex h-11 shrink-0 items-center gap-3 border-b border-line px-3">
       <button class="ct-icon-btn" title="返回书库（Esc）" data-reader-back @click="router.push('/library')">
@@ -485,6 +612,9 @@ watch(bookId, async () => {
         <span class="min-w-[52px] text-right text-[11.5px] tabular-nums text-faint" data-reader-page>
           {{ chapter ? pageLabel : '' }}
         </span>
+        <button class="ct-icon-btn" title="书签与笔记" data-reader-notes @click="notesOpen = !notesOpen">
+          <AppIcon name="bookmark" :size="15" />
+        </button>
         <button class="ct-icon-btn" title="排版与主题" data-reader-settings @click="settingsOpen = !settingsOpen">
           <AppIcon name="settings" :size="15" />
         </button>
@@ -518,7 +648,9 @@ watch(bookId, async () => {
           :html="chapter.html"
           :typography="reader.typography"
           :start-offset="entryOffset"
+          :highlights="chapterHighlights"
           @page-change="onPageChange"
+          @select="selection = $event"
         />
         <ScrollView
           v-else-if="chapter"
@@ -527,8 +659,26 @@ watch(bookId, async () => {
           :html="chapter.html"
           :typography="reader.typography"
           :start-offset="entryOffset"
+          :highlights="chapterHighlights"
           @progress="onScrollProgress"
+          @select="selection = $event"
         />
+      </div>
+
+      <!-- 选中文字后的操作条：浮在正文上方，不参与排版（否则一选中就重排） -->
+      <div
+        v-if="selection"
+        class="absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-1 rounded-lg border border-line-strong bg-elevated/95 px-1.5 py-1 shadow-lg backdrop-blur"
+        data-selection-bar
+      >
+        <span class="max-w-[220px] truncate px-1 text-[11px] text-faint" data-selection-text>
+          {{ selection.text }}
+        </span>
+        <button class="ct-btn !px-2 !py-1 !text-[11px]" data-highlight @click="addHighlight(false)">划线</button>
+        <button class="ct-btn !px-2 !py-1 !text-[11px]" data-highlight-note @click="addHighlight(true)">划线并备注</button>
+        <button class="ct-icon-btn" title="取消" data-selection-cancel @click="clearSelection">
+          <AppIcon name="close" :size="12" />
+        </button>
       </div>
 
       <!-- 首屏骨架：正文没到之前给出行块，避免一片空白 -->
@@ -559,6 +709,19 @@ watch(bookId, async () => {
     </main>
 
     <SettingsPanel :open="settingsOpen" @close="settingsOpen = false" />
+
+    <NotesPanel
+      :open="notesOpen"
+      :items="bookmarks"
+      :current-chapter="chapterIdx"
+      :chapters="chapters"
+      :exporting="exporting"
+      @close="notesOpen = false"
+      @jump="jumpToNote"
+      @save-note="saveNote"
+      @remove="removeNote"
+      @export="exportNotes"
+    />
 
     <TocDrawer
       :open="tocOpen"

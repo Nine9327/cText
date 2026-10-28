@@ -14,6 +14,7 @@ import { registerRootsIpc } from './ipc/roots'
 import { registerBooksIpc } from './ipc/books'
 import { registerReaderIpc } from './ipc/reader'
 import { registerSettingsIpc } from './ipc/settings'
+import { registerBookmarksIpc } from './ipc/bookmarks'
 import { installAssetProtocol, registerAssetScheme } from './protocol/assets'
 import { registerImportIpc } from './ipc/import'
 import { registerSystemIpc } from './ipc/system'
@@ -282,6 +283,7 @@ if (!gotLock) {
     registerImportIpc()
     registerReaderIpc()
     registerSettingsIpc()
+    registerBookmarksIpc()
     installAssetProtocol()
     installIpc()
 

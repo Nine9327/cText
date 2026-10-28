@@ -130,6 +130,31 @@ export function runDbSmoke(): Check[] {
   }
 
   // ---------------------------------------------------------------- 异物库防御
+  // **旧版号**的异物库也要拦（M2-09 加 002 迁移时踩到）：一个 user_version=1
+  // 但与 cText 无关的库，以前会走「正常升级路径」，002 的 ALTER TABLE 直接把
+  // 应用启动打挂。判据不是「版本号等于最新」，而是「非空库必须带着探针表」。
+  if (migrations.length > 1) {
+    const olderFile = join(app.getPath('temp'), `ctext-db-smoke-older-${Date.now()}.db`)
+    removeDbFiles(olderFile)
+    const older = new Database(olderFile)
+    older.pragma(`user_version = ${migrations.length - 1}`)
+    older.exec('CREATE TABLE novel_books (id TEXT PRIMARY KEY)')
+    older.close()
+
+    const reopenedOlder = openDatabase(olderFile)
+    try {
+      check(
+        '旧版号的异物库同样被归档',
+        typeof reopenedOlder.migration.archived === 'string',
+        reopenedOlder.migration.archived ?? '未归档（会走进正常升级路径）'
+      )
+      check('旧版号异物库归档后重建出现役表', generationTablesReady(reopenedOlder.db), 'books/library_roots/…')
+    } finally {
+      reopenedOlder.db.close()
+      removeDbFiles(olderFile)
+    }
+  }
+
   // 真实事故（2026-10-28）：原型期的库 user_version 恰好是 1，与迁移链最新版本
   // 撞车，migrate 认为已是最新，一张现役表都没建 → 所有查询报 no such table。
   // M1 期间全部验收都用全新临时库，这个路径从没被跑到过。

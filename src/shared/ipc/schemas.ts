@@ -94,6 +94,21 @@ export const ipcSchemas = {
   }),
   'reader:chapters': z.object({ bookId: idSchema }),
   'reader:progress': z.object({ bookId: idSchema }),
+  'bookmarks:list': z.object({ bookId: idSchema }),
+  'bookmarks:add': z.object({
+    bookId: idSchema,
+    chapterIdx: z.number().int().min(0).max(1_000_000),
+    offset: z.number().int().min(0).max(100_000_000),
+    endOffset: z.number().int().min(0).max(100_000_000).nullable(),
+    kind: z.enum(['bookmark', 'highlight']),
+    // 划线最长 5000 字：再长就不是「划线」而是「整章摘录」，超出多半是选区出错了
+    text: z.string().max(5000).nullable(),
+    note: z.string().max(5000).nullable().optional()
+  }),
+  'bookmarks:updateNote': z.object({ id: idSchema, note: z.string().max(5000).nullable() }),
+  'bookmarks:remove': z.object({ id: idSchema }),
+  'bookmarks:export': z.object({ bookId: idSchema, path: pathSchema.nullable() }),
+
   'reader:saveProgress': z.object({
     bookId: idSchema,
     chapterIdx: z.number().int().min(0).max(1_000_000),

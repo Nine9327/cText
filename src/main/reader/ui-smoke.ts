@@ -20,6 +20,7 @@ import { getDb } from '../db/connection'
 import { coversDir } from '../ipc/import'
 import { getTaskSnapshot, startImport } from '../library/import-task'
 import { loadSettings } from '../db/repositories/settings'
+import { exportBookmarks, listBookmarks } from '../db/repositories/bookmarks'
 
 export interface Check {
   name: string
@@ -561,6 +562,159 @@ async function scenario(win: BrowserWindow, dir: string, check: CheckFn): Promis
     check('重开目录：当前章高亮且自动滚到可视区', active === jumped.idx, `高亮 idx=${active} / 跳转 idx=${jumped.idx}`)
     await run(win, `q('[data-toc-close]').click(); await sleep(200); return true`)
   }
+
+  // ---------------------------------------------------------------- 书签与划线（M2-09）
+  await run(win, `location.hash = '#/reader/${row.id}'; return true`)
+  await waitUntil(async () => ((await readerTitle(win)).includes('分页样本') ? true : null), 10_000)
+  await run(win, `q('[data-mode="paged"]').click(); await sleep(300); return true`)
+
+  // 用真实的 Range + mouseup 走一遍选区链路（拖拽本身由浏览器负责，这里测的是我们的换算）
+  const selected = (await run(win, `
+    const content = q('[data-page-content]')
+    const paragraph = content.querySelector('p')
+    const textNode = paragraph.firstChild
+    const range = document.createRange()
+    range.setStart(textNode, 0)
+    range.setEnd(textNode, 14)
+    const selection = window.getSelection()
+    selection.removeAllRanges()
+    selection.addRange(range)
+    content.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+    await sleep(150)
+    const bar = q('[data-selection-bar]')
+    return JSON.stringify({
+      bar: !!bar,
+      text: bar ? txt(q('[data-selection-text]')) : '',
+      expected: content.textContent.slice(0, 14)
+    })
+  `)) as string
+  const picked = JSON.parse(selected) as { bar: boolean; text: string; expected: string }
+  check(
+    '选中正文后出现操作条，且选区文字与正文一致',
+    picked.bar && picked.text === picked.expected && picked.expected.length === 14,
+    `「${picked.text}」/ 期望「${picked.expected}」`
+  )
+
+  await run(win, `q('[data-highlight]').click(); await sleep(400); return true`)
+  const marks = JSON.parse(
+    (await run(win, `return JSON.stringify(window.__ctextReader.marks())`)) as string
+  ) as { id: string; offset: number; endOffset: number; text: string }[]
+  check(
+    '划线立刻画到正文上（mark 覆盖同一段文字）',
+    marks.length === 1 && marks[0]!.text === picked.expected && marks[0]!.offset === 0 && marks[0]!.endOffset === 14,
+    marks.length ? `偏移 ${marks[0]!.offset}-${marks[0]!.endOffset}「${marks[0]!.text}」` : '没有 mark'
+  )
+
+  await run(win, `q('[data-reader-notes]').click(); await sleep(250); return true`)
+  const listText = (await run(win, `
+    return JSON.stringify({
+      count: txt(q('[data-notes-count]')),
+      first: txt(q('[data-note-text]'))
+    })
+  `)) as string
+  const listed = JSON.parse(listText) as { count: string; first: string }
+  check(
+    '侧栏列出划线（条数与摘录一致）',
+    listed.count === '1' && listed.first === picked.expected,
+    `计数 ${listed.count} / 摘录「${listed.first}」`
+  )
+  await run(win, `q('[data-notes-close]').click(); await sleep(200); return true`)
+
+  // 改字号：划线必须还在同一段文字上，且偏移不变（「重排后位置不漂」）
+  await run(win, `
+    q('[data-reader-settings]').click()
+    await sleep(250)
+    q('[data-font-up]').click()
+    await sleep(200)
+    q('[data-font-up]').click()
+    await sleep(300)
+    q('[data-settings-close]').click()
+    await sleep(300)
+    return true
+  `)
+  const marksAfter = JSON.parse(
+    (await run(win, `return JSON.stringify(window.__ctextReader.marks())`)) as string
+  ) as { id: string; offset: number; endOffset: number; text: string }[]
+  check(
+    '改字号重排后划线位置不漂（偏移与文字都不变）',
+    marksAfter.length === 1 &&
+      marksAfter[0]!.offset === marks[0]!.offset &&
+      marksAfter[0]!.endOffset === marks[0]!.endOffset &&
+      marksAfter[0]!.text === marks[0]!.text,
+    marksAfter.length ? `偏移 ${marksAfter[0]!.offset}-${marksAfter[0]!.endOffset}「${marksAfter[0]!.text}」` : 'mark 丢了'
+  )
+
+  // 备注
+  await run(win, `
+    q('[data-reader-notes]').click()
+    await sleep(250)
+    q('[data-note-edit]').click()
+    await sleep(250)
+    const input = q('[data-note-input]')
+    input.value = '这段写得好'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await sleep(120)
+    q('[data-note-save]').click()
+    await sleep(350)
+    return true
+  `)
+  if (shot) writeFileSync(shot.replace(/\.png$/i, '-notes.png'), (await win.capturePage()).toPNG())
+
+  const noteText = (await run(win, `const el = q('[data-note-note]'); return el ? txt(el) : ''`)) as string
+  check('备注保存后显示在列表里', noteText === '这段写得好', noteText || '没有备注')
+
+  // Ctrl+D：当前位置加纯书签
+  await run(win, `
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, bubbles: true }))
+    await sleep(400)
+    return true
+  `)
+  const afterBookmark = (await run(win, `return txt(q('[data-notes-count]'))`)) as string
+  check('Ctrl+D 在当前位置加书签', afterBookmark === '2', `计数 ${afterBookmark}`)
+
+  // 跳到第 2 章，再从列表点回第 1 章的那条
+  await run(win, `q('[data-notes-close]').click(); await sleep(200); return true`)
+  await run(win, `
+    for (let i = 0; i < 12; i += 1) {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
+      await sleep(120)
+      if (txt(q('[data-reader-title]')).includes('第2章')) break
+    }
+    await sleep(200)
+    return true
+  `)
+  const atChapter2 = (await readerTitle(win)).includes('第2章')
+  await run(win, `
+    q('[data-reader-notes]').click()
+    await sleep(250)
+    const first = q('[data-note-id]')
+    if (first) first.querySelector('[data-note-text]').click()
+    await sleep(600)
+    return true
+  `)
+  const jumpedBack = await readerTitle(win)
+  const panelClosed = (await run(win, `return !!q('[data-notes-panel]')`)) === false
+  check(
+    '从列表跳转回第 1 章（面板关闭）',
+    atChapter2 && jumpedBack.includes('第1章') && panelClosed,
+    `${atChapter2 ? '先到第 2 章' : '没翻到第 2 章'} → 跳转后「${jumpedBack}」`
+  )
+
+  // 导出内容（对话框那三行不自动化，验的是排版逻辑）
+  const markdown = exportBookmarks(getDb(), row.id, '分页样本')
+  check(
+    '导出 Markdown 含摘录与备注',
+    markdown.includes(picked.expected) && markdown.includes('这段写得好') && markdown.startsWith('# 《分页样本》'),
+    markdown.split('\n').slice(0, 3).join(' / ')
+  )
+  const stored = listBookmarks(getDb(), row.id)
+  check(
+    '划线落库为「章 + 起止偏移」两个整数',
+    stored.length === 2 &&
+      stored.some((item) => item.kind === 'highlight' && item.offset === 0 && item.endOffset === 14) &&
+      stored.some((item) => item.kind === 'bookmark' && item.endOffset === null),
+    stored.map((item) => `${item.kind}@${item.offset}-${item.endOffset ?? '·'}`).join(' / ')
+  )
 
   // ---------------------------------------------------------------- 排版与主题（M2-07）
   await run(win, `location.hash = '#/reader/${row.id}'; return true`)

@@ -238,7 +238,10 @@ export interface BookmarkDTO {
   id: string
   bookId: string
   chapterIdx: number
+  /** 起点字符偏移（章内） */
   offset: number
+  /** 终点字符偏移（划线专用；纯书签为 null）。右开区间 */
+  endOffset: number | null
   kind: BookmarkKind
   text: string | null
   note: string | null
