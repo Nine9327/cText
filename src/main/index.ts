@@ -31,6 +31,7 @@ import { runUiSmoke } from './ui/smoke'
 import { seedUiFixture } from './ui/ui-fixture'
 import { runListSmoke } from './ui/list-smoke'
 import { runSearchSmoke } from './ui/search-smoke'
+import { runFavoriteSmoke } from './ui/favorite-smoke'
 import { runReaderSmoke } from './reader/smoke'
 import { runReaderBigSmoke } from './reader/big-smoke'
 import { runReaderUiSmoke } from './reader/ui-smoke'
@@ -373,6 +374,12 @@ if (!gotLock) {
     // M1-10 自检：搜索（FTS 前缀命中 / 索引同步 / 200ms 防抖 / 离线标注）
     if (!app.isPackaged && mainWindow && process.env['CTEXT_SEARCH_SMOKE'] === '1') {
       await runSearchSmoke(mainWindow)
+      return
+    }
+
+    // M3-01 自检：收藏（纯标记不改缓存版本号 / 星标 / 侧栏计数 / 收藏页移除）
+    if (!app.isPackaged && mainWindow && process.env['CTEXT_FAVORITE_SMOKE'] === '1') {
+      await runFavoriteSmoke(mainWindow)
       return
     }
 

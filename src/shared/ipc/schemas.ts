@@ -84,6 +84,8 @@ export const ipcSchemas = {
     limit: z.number().int().min(1).max(20).optional()
   }),
   'library:get': z.object({ id: idSchema }),
+  /** 收藏开关（M3-01）：传目标值而不是「切换」，重试幂等 */
+  'library:toggleFavorite': z.object({ id: idSchema, value: z.boolean() }),
 
   'shelves:get': z.object({ shelfId: idSchema }),
   'shelves:list': z.void(),

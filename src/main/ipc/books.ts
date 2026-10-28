@@ -12,8 +12,17 @@
  * 同名 handler 注册即覆盖）。
  */
 import type { BookDTO, Paged, ShelfDTO } from '@shared/dto'
+import { AppError, ERROR_CODES } from '@shared/errors'
 import { getDb } from '../db/connection'
-import { countBooks, getBookDetail, getShelf, listBooks, listShelves, recentBooks } from '../db/repositories/books'
+import {
+  countBooks,
+  getBookDetail,
+  getShelf,
+  listBooks,
+  listShelves,
+  recentBooks,
+  setFavorite
+} from '../db/repositories/books'
 import { relocateBookFile } from '../library/relocate'
 import { registerHandler } from './registry'
 
@@ -59,4 +68,14 @@ export function registerBooksIpc(): void {
 
   registerHandler('shelves:list', (): ShelfDTO[] => listShelves(getDb()))
   registerHandler('shelves:get', ({ shelfId }): ShelfDTO | null => getShelf(getDb(), shelfId))
+
+  /**
+   * 收藏开关（M3-01）。入参是「目标值」而不是「切换」：
+   * 幂等，重试与两次点击合并都不会把状态翻回去。
+   */
+  registerHandler('library:toggleFavorite', ({ id, value }) => {
+    if (!setFavorite(getDb(), id, value)) {
+      throw new AppError(ERROR_CODES.notFound, '这本书已不在书库中，请刷新列表')
+    }
+  })
 }

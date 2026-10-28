@@ -119,6 +119,35 @@ export const useLibraryStore = defineStore('library', () => {
     recent.value = await call('books:recent', { ...scope(), limit: 3 })
   }
 
+  /**
+   * 收藏开关（M3-01）。
+   *
+   * 三处状态要一起动：列表里那张卡、侧栏计数、（收藏页上取消收藏后）这张卡本身
+   * 该消失。**不能靠 reload() 解决**——整表重拉会把「已经加载的 84 页」与滚动
+   * 位置一起丢掉，翻到第 500 本点一下星标就跳回第一页。
+   *
+   * 传目标值而不是「切换」：双击时两次 IPC 若不巧乱序，切换语义会把状态翻回去
+   * （第一次 +1、第二次 -1），目标值语义下两次结果一致。
+   */
+  async function toggleFavorite(book: BookDTO): Promise<boolean> {
+    const next = !book.favorite
+    await call('library:toggleFavorite', { id: book.id, value: next })
+
+    // 就地改：`books` 里的对象是 IPC 反序列化出来的普通对象，改它不会影响别的域
+    const patch = (item: BookDTO): void => {
+      if (item.id === book.id) item.favorite = next
+    }
+    books.value.forEach(patch)
+    recent.value.forEach(patch)
+
+    if (domain.value.favoritesOnly && !next) {
+      books.value = books.value.filter((item) => item.id !== book.id)
+      booksTotal.value = Math.max(0, booksTotal.value - 1)
+    }
+    await loadFavCount()
+    return next
+  }
+
   async function loadPage(offset: number): Promise<void> {
     loading.value = true
     loadError.value = null
@@ -237,6 +266,7 @@ export const useLibraryStore = defineStore('library', () => {
     setDomain,
     setSort,
     setKeyword,
+    toggleFavorite,
     rootCount,
     bindEvents
   }

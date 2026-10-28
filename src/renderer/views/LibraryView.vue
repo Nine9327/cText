@@ -46,6 +46,24 @@ function openBook(book: BookDTO): void {
 const library = useLibraryStore()
 const imports = useImportStore()
 
+/**
+ * 星标（M3-01）。
+ *
+ * 成功时不弹提示——星星本身变成了实心金色，这已经是反馈；再弹一条 toast
+ * 等于在用户眼前重复同一件事。**唯一的例外是「收藏页里取消收藏」**：
+ * 卡片会当场消失，不解释一句就成了「我的鼠标点坏了什么」。
+ */
+async function toggleFavorite(book: BookDTO): Promise<void> {
+  try {
+    const next = await library.toggleFavorite(book)
+    if (!next && isFavorites.value) {
+      pushToast({ level: 'info', message: `已取消收藏《${book.title}》，它已从收藏中移除` })
+    }
+  } catch (err) {
+    pushToast({ level: 'error', message: err instanceof Error ? err.message : '收藏失败，请重试' })
+  }
+}
+
 const viewMode = ref<'grid' | 'detail' | 'list'>('grid')
 
 /**
@@ -372,6 +390,7 @@ watch(
               :book="book"
               :variant="viewMode"
               @open="openBook(book)"
+              @favorite="toggleFavorite(book)"
             />
           </div>
         </div>

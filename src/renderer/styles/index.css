@@ -124,4 +124,19 @@
   .ct-section-active {
     @apply text-ink;
   }
+
+  /**
+   * 卡片上的星标（M3-01）。
+   *
+   * 未收藏时常态透明、hover 才浮现：整页几十张卡上钉满空心星会盖住封面，
+   * 而「能收藏」这件事只需要在指针经过时被提示一次。已收藏（`.ct-fav-on`）
+   * 恒可见且是实心金色——它是**状态**，不是可点提示。
+   */
+  .ct-fav-btn {
+    @apply flex h-6 w-6 items-center justify-center rounded-md bg-black/45 text-white/75 backdrop-blur-[2px] transition-all duration-120 hover:text-amber-300;
+  }
+
+  .ct-fav-on {
+    @apply text-amber-400 hover:text-amber-300;
+  }
 }

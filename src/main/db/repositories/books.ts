@@ -369,6 +369,23 @@ export function getShelf(db: Db, shelfId: string): import('@shared/dto').ShelfDT
 }
 
 /**
+ * 收藏开关（M3-01）。
+ *
+ * **不碰 `updated_at`**：它是阅读器章节缓存的版本号（`bookId:idx:updated_at`），
+ * 收藏是纯标记，改它等于「点一下星标就把整章缓存作废」，下次翻回来要重新读盘。
+ * 同理也不写 `books_fts`——触发器只跟着 title/author/intro 的更新走，
+ * 这里不动这三列。
+ *
+ * 返回 false 表示书不存在或已软删除，调用方据此报错而不是静默成功。
+ */
+export function setFavorite(db: Db, id: string, value: boolean): boolean {
+  const info = db
+    .prepare('UPDATE books SET favorite = ? WHERE id = ? AND deleted_at IS NULL')
+    .run(value ? 1 : 0, id)
+  return info.changes > 0
+}
+
+/**
  * 整本目录（M2-06）。
  *
  * 只取 `idx / title / level`：抽屉要渲染上千行，`anchor/length` 这些正文用的字段
