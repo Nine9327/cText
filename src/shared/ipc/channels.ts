@@ -36,7 +36,12 @@ export const INVOKE_CHANNELS = defineChannels<IpcChannel>()([
 
   'shelves:list',
   'shelves:create',
+  'shelves:rename',
+  'shelves:remove',
   'shelves:addBooks',
+  'shelves:removeBooks',
+  'shelves:moveBook',
+  'shelves:reorder',
   'books:list',
   'books:count',
   'books:recent',

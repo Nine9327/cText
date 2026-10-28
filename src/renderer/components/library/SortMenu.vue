@@ -26,14 +26,27 @@ const PRESETS: SortPreset[] = [
   { field: 'progress', direction: 'desc', label: '阅读进度' }
 ]
 
+/**
+ * 「架内顺序」（M3-02）只在书架页出现。
+ *
+ * 别的页面没有 `shelfId`，选它等于选了一个无意义的排序（仓储会退回导入时间）。
+ * 反过来在书架页里它是**唯一能回到拖拽结果**的入口，所以不能因为
+ * 「用户选了书名」就把它藏起来——`shelf` 由调用方按路由给，不看当前选中项。
+ */
+const SHELF_PRESET: SortPreset = { field: 'shelfOrder', direction: 'asc', label: '架内顺序' }
+
+const props = defineProps<{ shelf?: boolean }>()
+
 const library = useLibraryStore()
 
 const open = ref(false)
 const rootEl = ref<HTMLElement | null>(null)
 
+const presets = computed<SortPreset[]>(() => (props.shelf ? [SHELF_PRESET, ...PRESETS] : PRESETS))
+
 const current = computed<SortPreset>(
   () =>
-    PRESETS.find(
+    presets.value.find(
       (preset) => preset.field === library.sort.field && preset.direction === library.sort.direction
     ) ?? (PRESETS[1] as SortPreset)
 )
@@ -111,7 +124,7 @@ onBeforeUnmount(() => {
     >
       <p class="px-2 pb-1 pt-0.5 text-[10.5px] tracking-wider text-faint">书籍排序</p>
       <button
-        v-for="preset in PRESETS"
+        v-for="preset in presets"
         :key="preset.field"
         type="button"
         role="option"

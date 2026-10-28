@@ -9,11 +9,13 @@
  *   4. 折叠态不渲染分区明细，五个入口退化成图标按钮（hover 有 title 提示）。
  *   5. 数据全部来自 store，M1 换成真实查询时本文件不用动。
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import AppIcon from '@/components/common/AppIcon.vue'
 import LibrarySwitcher from '@/components/layout/LibrarySwitcher.vue'
 import SidebarSection from '@/components/layout/SidebarSection.vue'
+import ShelfNameDialog from '@/components/library/ShelfNameDialog.vue'
 import { pushToast } from '@/lib/toast'
+import { BOOK_MIME, SHELF_MIME, getDragSource, setDragSource } from '@/lib/drag'
 import { useLibraryStore } from '@/stores/library'
 import { fixtureSources } from '@/fixture/sources'
 import { useUiStore } from '@/stores/ui'
@@ -23,8 +25,64 @@ const ui = useUiStore()
 
 const collapsed = computed(() => ui.state.sidebarCollapsed)
 
+// ---------------------------------------------------------------- 书架（M3-02）
+
+/** 拖拽用的自有 MIME：与文件拖放（OS 给的 Files）区分开，互不干扰 */
+const creating = ref(false)
+/** 当前被拖到哪个书架上方：只做视觉提示，落点由 drop 决定 */
+const hoverShelfId = ref<string | null>(null)
+
 function createShelf(): void {
-  pushToast({ level: 'info', message: '新建书架将在 M3-02 提供' })
+  creating.value = true
+}
+
+async function confirmCreate(name: string): Promise<void> {
+  creating.value = false
+  try {
+    await library.createShelf(name)
+    pushToast({ level: 'info', message: `已创建书架「${name}」` })
+  } catch (err) {
+    pushToast({ level: 'error', message: err instanceof Error ? err.message : '创建书架失败' })
+  }
+}
+
+/** 书库/收藏页的书卡拖到书架条目上 = 加入书架 */
+async function onShelfDrop(event: DragEvent, shelfId: string): Promise<void> {
+  hoverShelfId.value = null
+  if (!event.dataTransfer) return
+  const bookId = getDragSource('book')
+  const movedShelf = getDragSource('shelf')
+
+  try {
+    if (bookId) {
+      const shelf = library.shelves.find((item) => item.id === shelfId)
+      const added = await library.addToShelf(shelfId, [bookId])
+      pushToast(
+        added > 0
+          ? { level: 'info', message: `已加入书架「${shelf?.name ?? ''}」` }
+          : { level: 'info', message: `这本书已经在「${shelf?.name ?? ''}」里了` }
+      )
+      return
+    }
+    if (movedShelf && movedShelf !== shelfId) {
+      const ids = library.shelves.map((item) => item.id)
+      const from = ids.indexOf(movedShelf)
+      const to = ids.indexOf(shelfId)
+      if (from >= 0 && to >= 0) {
+        ids.splice(from, 1)
+        ids.splice(to, 0, movedShelf)
+        await library.reorderShelves(ids)
+      }
+    }
+  } catch (err) {
+    pushToast({ level: 'error', message: err instanceof Error ? err.message : '书架操作失败' })
+  }
+}
+
+/** 只允许「书」与「书架」两种拖拽进入，避免文件拖放把书架条目点亮 */
+function acceptDrag(event: DragEvent): boolean {
+  const types = event.dataTransfer?.types ?? []
+  return types.includes(BOOK_MIME) || types.includes(SHELF_MIME)
 }
 </script>
 
@@ -85,8 +143,20 @@ function createShelf(): void {
             :key="shelf.id"
             :to="`/shelves/${shelf.id}`"
             class="ct-nav-item"
+            :class="hoverShelfId === shelf.id && 'ring-1 ring-inset ring-accent/60'"
             active-class="ct-nav-item-active"
+            draggable="true"
             data-shelf-item
+            @dragstart="
+              (event) => {
+                setDragSource({ kind: 'shelf', id: shelf.id })
+                event.dataTransfer?.setData(SHELF_MIME, shelf.id)
+                hoverShelfId = null
+              }
+            "
+            @dragover.prevent="acceptDrag($event) && (hoverShelfId = shelf.id)"
+            @dragleave="hoverShelfId === shelf.id && (hoverShelfId = null)"
+            @drop.prevent="onShelfDrop($event, shelf.id)"
           >
             <AppIcon name="folder" :size="14" class="text-faint" />
             <span class="flex-1 truncate">{{ shelf.name }}</span>
@@ -230,5 +300,13 @@ function createShelf(): void {
         </button>
       </div>
     </template>
+
+    <ShelfNameDialog
+      :open="creating"
+      title="新建书架"
+      confirm-text="创建"
+      @confirm="confirmCreate"
+      @cancel="creating = false"
+    />
   </aside>
 </template>

@@ -110,6 +110,75 @@ export const useLibraryStore = defineStore('library', () => {
     shelves.value = await call('shelves:list')
   }
 
+  // ---------------------------------------------------------------- 书架（M3-02）
+
+  /**
+   * 书架写操作的统一收尾：重拉书架（侧栏与书架页共用一份数据），
+   * 并**在书架页里同步刷新列表**——「加进去 / 移出去」之后列表若不动，
+   * 用户会以为操作没生效，然后再点一次。
+   *
+   * 只在 `domain.shelfId` 命中时才 reload 列表：从书库页拖书进书架时
+   * 重拉列表会把滚动位置丢掉。
+   */
+  async function afterShelfWrite(shelfId?: string): Promise<void> {
+    await loadShelves()
+    if (domain.value.shelfId && (!shelfId || domain.value.shelfId === shelfId)) {
+      await loadPage(0)
+    }
+  }
+
+  async function createShelf(name: string): Promise<ShelfDTO> {
+    const shelf = await call('shelves:create', { name })
+    await loadShelves()
+    return shelf
+  }
+
+  async function renameShelf(shelfId: string, name: string): Promise<void> {
+    await call('shelves:rename', { shelfId, name })
+    await loadShelves()
+  }
+
+  /**
+   * 删除书架。**只删分组，不删书**（主进程的 `shelves:remove` 只 DELETE shelves 行，
+   * `shelf_books` 靠外键 CASCADE 清掉，`books` 一行不动）。
+   */
+  async function removeShelf(shelfId: string): Promise<void> {
+    await call('shelves:remove', { shelfId })
+    // 当前正停在这个书架里：域已经不存在，直接清空并回到「书架总览」由视图决定
+    if (domain.value.shelfId === shelfId) {
+      domain.value = {}
+      books.value = []
+      booksTotal.value = 0
+      loaded.value = true
+    }
+    await loadShelves()
+  }
+
+  /** 加入书架。返回真正新增的条数（已在架上的书不算） */
+  async function addToShelf(shelfId: string, bookIds: string[]): Promise<number> {
+    const { added } = await call('shelves:addBooks', { shelfId, bookIds })
+    if (added > 0) await afterShelfWrite(shelfId)
+    return added
+  }
+
+  async function removeFromShelf(shelfId: string, bookIds: string[]): Promise<number> {
+    const { removed } = await call('shelves:removeBooks', { shelfId, bookIds })
+    if (removed > 0) await afterShelfWrite(shelfId)
+    return removed
+  }
+
+  /** 架内拖动排序（0 基）。服务端负责整体重排，这里只重拉当前页 */
+  async function moveBookInShelf(shelfId: string, bookId: string, toIndex: number): Promise<void> {
+    await call('shelves:moveBook', { shelfId, bookId, toIndex })
+    if (domain.value.shelfId === shelfId) await loadPage(0)
+  }
+
+  /** 侧栏书架拖动排序 */
+  async function reorderShelves(shelfIds: string[]): Promise<void> {
+    await call('shelves:reorder', { shelfIds })
+    await loadShelves()
+  }
+
   async function loadFavCount(): Promise<void> {
     const { total } = await call('books:count', { ...scope(), favoritesOnly: true })
     favCount.value = total
@@ -208,6 +277,20 @@ export const useLibraryStore = defineStore('library', () => {
   /** 由路由驱动的域切换（LibraryView watch route 调用） */
   function setDomain(next: LibraryDomain): void {
     domain.value = next
+
+    /*
+     * 书架域默认按「架内顺序」排。
+     *
+     * 这不只是默认值的问题：架内排序是用户拖出来的，如果列表仍按导入时间排，
+     * 拖完一看顺序没变，用户会认为拖拽坏了。反方向同理——离开书架还留着
+     * `shelfOrder` 的话，`books:list` 会因为没有 shelfId 而退回导入时间，
+     * 排序菜单却显示「架内顺序」，说了假话。
+     */
+    if (next.shelfId && sort.value.field !== 'shelfOrder') {
+      sort.value = { field: 'shelfOrder', direction: 'asc' }
+    } else if (!next.shelfId && sort.value.field === 'shelfOrder') {
+      sort.value = { field: 'createdAt', direction: 'desc' }
+    }
     void reload()
   }
 
@@ -267,6 +350,14 @@ export const useLibraryStore = defineStore('library', () => {
     setSort,
     setKeyword,
     toggleFavorite,
+    loadShelves,
+    createShelf,
+    renameShelf,
+    removeShelf,
+    addToShelf,
+    removeFromShelf,
+    moveBookInShelf,
+    reorderShelves,
     rootCount,
     bindEvents
   }

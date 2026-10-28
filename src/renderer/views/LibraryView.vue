@@ -22,6 +22,7 @@ import SegmentedControl from '@/components/common/SegmentedControl.vue'
 import SortMenu from '@/components/library/SortMenu.vue'
 import BookCard from '@/components/book/BookCard.vue'
 import { pushToast } from '@/lib/toast'
+import { BOOK_MIME, getDragSource } from '@/lib/drag'
 import { useImportStore } from '@/stores/import'
 import { useLibraryStore } from '@/stores/library'
 import type { BookDTO } from '@shared/dto'
@@ -61,6 +62,42 @@ async function toggleFavorite(book: BookDTO): Promise<void> {
     }
   } catch (err) {
     pushToast({ level: 'error', message: err instanceof Error ? err.message : '收藏失败，请重试' })
+  }
+}
+
+// ---------------------------------------------------------------- 书架（M3-02）
+
+/** 书架页卡片上的「移出」：只解除分组，**不删书**（提示里要说清这一点） */
+async function removeFromShelf(book: BookDTO): Promise<void> {
+  if (!shelfId.value) return
+  try {
+    await library.removeFromShelf(shelfId.value, [book.id])
+    pushToast({ level: 'info', message: `已把《${book.title}》移出书架，文件仍在书库中` })
+  } catch (err) {
+    pushToast({ level: 'error', message: err instanceof Error ? err.message : '移出书架失败' })
+  }
+}
+
+/**
+ * 架内拖拽排序：把书拖到另一张卡上 = 移到它的位置。
+ *
+ * 只在书架域生效——书库/收藏页的排序由排序菜单决定，拖动没有落点语义，
+ * 而那里的拖动是为了「拖到侧栏书架上」。
+ */
+function onCardDragOver(event: DragEvent): void {
+  if (!isShelf.value) return
+  if ((event.dataTransfer?.types ?? []).includes(BOOK_MIME)) event.preventDefault()
+}
+
+async function onCardDrop(event: DragEvent, toIndex: number, target: BookDTO): Promise<void> {
+  if (!isShelf.value || !shelfId.value) return
+  const bookId = event.dataTransfer ? getDragSource('book') : null
+  if (!bookId || bookId === target.id) return
+  event.preventDefault()
+  try {
+    await library.moveBookInShelf(shelfId.value, bookId, toIndex)
+  } catch (err) {
+    pushToast({ level: 'error', message: err instanceof Error ? err.message : '移动失败' })
   }
 }
 
@@ -149,7 +186,7 @@ const emptyState = computed(() => {
     }
   }
   if (isShelf.value) {
-    return { icon: 'folder' as const, title: '这个书架还是空的', desc: 'M3-02 起可以把书拖进书架。' }
+    return { icon: 'folder' as const, title: '这个书架还是空的', desc: '在书库里把书拖到侧栏的这个书架上，就能加进来。' }
   }
   return { icon: 'book' as const, title: '当前书库没有书籍', desc: '换一个书库根目录，或先导入本地文件。' }
 })
@@ -337,7 +374,7 @@ watch(
         <SegmentedControl v-model="viewMode" :options="viewOptions" />
 
         <div class="flex items-center gap-2">
-          <SortMenu />
+          <SortMenu :shelf="isShelf" />
 
           <div class="flex">
             <button class="ct-btn rounded-r-none" title="导入书籍" data-import-trigger @click="importBooks">
@@ -384,14 +421,23 @@ watch(
               rowGap: `${geometry.rowGap}px`
             }"
           >
-            <BookCard
-              v-for="book in row.books"
+            <div
+              v-for="(book, column) in row.books"
               :key="book.id"
-              :book="book"
-              :variant="viewMode"
-              @open="openBook(book)"
-              @favorite="toggleFavorite(book)"
-            />
+              class="min-w-0"
+              @dragover="onCardDragOver"
+              @drop="onCardDrop($event, row.index * columnCount + column, book)"
+            >
+              <BookCard
+                :book="book"
+                :variant="viewMode"
+                :draggable="true"
+                :removable="isShelf"
+                @open="openBook(book)"
+                @favorite="toggleFavorite(book)"
+                @remove="removeFromShelf(book)"
+              />
+            </div>
           </div>
         </div>
 

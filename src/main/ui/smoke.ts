@@ -232,11 +232,18 @@ const UI_CASES = String.raw`
     await sleep(300)
     push('失效书架 id 显示空状态', !!q('[data-empty]') && txt(q('[data-empty-title]')) === '书架不存在', txt(q('[data-empty-title]')))
 
+    // M3-02 起「新建书架」是真功能了（M0-08 时它只弹一句「将在 M3-02 提供」），
+    // 这里改验它真的打开命名对话框，并确认取消能收回去
     location.hash = '#/shelves'
     await sleep(300)
     await click('[data-shelf-create]')
-    const toast = await waitFor(() => q('[data-toast]'), 2000)
-    push('未实现动作给出 toast 提示', !!toast && txt(toast).includes('M3-02'), toast ? txt(toast) : '未出现 toast')
+    const dialog = await waitFor(() => q('[data-shelf-dialog]'), 2000)
+    push('新建书架打开命名对话框', !!dialog, dialog ? txt(q('[data-shelf-dialog-title]')) : '未出现对话框')
+    if (dialog) {
+      await click('[data-shelf-dialog-cancel]')
+      await sleep(150)
+      push('取消后对话框关闭', !q('[data-shelf-dialog]'))
+    }
   } catch (err) {
     push('自检脚本执行', false, err && err.message ? err.message : String(err))
   }

@@ -80,7 +80,15 @@ export interface BookDetailDTO extends BookDTO {
   shelves: ShelfRefDTO[]
 }
 
-export type BookSortField = 'lastReadAt' | 'title' | 'author' | 'progress' | 'createdAt'
+/**
+ * 排序字段（M1-09，M3-02 加 `shelfOrder`）。
+ *
+ * `shelfOrder` 只在书架域有意义：它按 `shelf_books.sort` 排，方向恒为升序
+ * （「架内顺序」是一个列表位置，反转没有语义）。没有 `shelfId` 时仓储会
+ * 退回「导入时间倒序」而不是报错——排序菜单是跨三入口共享的，用户从书架页
+ * 回到书库页时可能刚好还选中它。
+ */
+export type BookSortField = 'lastReadAt' | 'title' | 'author' | 'progress' | 'createdAt' | 'shelfOrder'
 
 export interface BookSort {
   field: BookSortField

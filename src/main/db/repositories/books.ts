@@ -243,7 +243,7 @@ export interface BookListQuery {
  *   - 末尾恒接 `books.id` 同向兜底：同毫秒插入 / 同名同作者时顺序稳定，
  *     否则翻页会出现重复或漏项。
  */
-const ORDER_BY: Record<BookSortField, string> = {
+const ORDER_BY: Record<Exclude<BookSortField, 'shelfOrder'>, string> = {
   createdAt: 'books.created_at',
   lastReadAt: 'books.last_read_at IS NULL, books.last_read_at',
   title: 'books.title COLLATE NOCASE',
@@ -251,10 +251,23 @@ const ORDER_BY: Record<BookSortField, string> = {
   progress: 'books.progress'
 }
 
-function orderByClause(sort: BookSort | undefined): string {
-  const field = sort && sort.field in ORDER_BY ? sort.field : 'createdAt'
+/**
+ * ORDER BY 子句 + 它自己需要的绑定参数。
+ *
+ * `shelfOrder`（M3-02）用**相关子查询**取 `shelf_books.sort`，不 join：
+ * 书架的列表与计数走同一段 where，多一个 join 就要在两条 SQL 里各改一遍。
+ * 方向恒 ASC——架内顺序是「位置」，反转没有语义。
+ */
+function orderByClause(sort: BookSort | undefined, shelfId: string | undefined): { clause: string; params: unknown[] } {
+  const field = sort?.field
+  if (field === 'shelfOrder') {
+    if (!shelfId) return { clause: 'books.created_at DESC, books.id DESC', params: [] }
+    const expr = '(SELECT sort FROM shelf_books WHERE shelf_id = ? AND book_id = books.id)'
+    return { clause: `${expr} ASC, books.id ASC`, params: [shelfId] }
+  }
+  const key = field && field in ORDER_BY ? (field as Exclude<BookSortField, 'shelfOrder'>) : 'createdAt'
   const direction = sort?.direction === 'asc' ? 'ASC' : 'DESC'
-  return `${ORDER_BY[field]} ${direction}, books.id ${direction}`
+  return { clause: `${ORDER_BY[key]} ${direction}, books.id ${direction}`, params: [] }
 }
 
 /**
@@ -306,9 +319,10 @@ export function listBooks(db: Db, query: BookListQuery): { items: import('@share
   const total = asCount(
     db.prepare(`SELECT COUNT(*) AS n FROM books WHERE deleted_at IS NULL${where}`).get(...params) as { n: number }
   )
+  const order = orderByClause(query.sort, query.shelfId)
   const rows = db
-    .prepare(`${BOOK_SELECT}${where} ORDER BY ${orderByClause(query.sort)} LIMIT ? OFFSET ?`)
-    .all(...params, query.limit, query.offset) as BookRow[]
+    .prepare(`${BOOK_SELECT}${where} ORDER BY ${order.clause} LIMIT ? OFFSET ?`)
+    .all(...params, ...order.params, query.limit, query.offset) as BookRow[]
 
   return { items: rows.map(toBookDTO), total }
 }
@@ -345,28 +359,10 @@ export function countBooks(
   })
 }
 
-export function listShelves(db: Db): import('@shared/dto').ShelfDTO[] {
-  const rows = db
-    .prepare(
-      `SELECT shelves.id, shelves.name, shelves.icon, shelves.sort, shelves.created_at,
-              (SELECT COUNT(*) FROM shelf_books sb JOIN books b ON b.id = sb.book_id
-                WHERE sb.shelf_id = shelves.id AND b.deleted_at IS NULL) AS book_count
-       FROM shelves ORDER BY shelves.sort, shelves.created_at`
-    )
-    .all() as { id: string; name: string; icon: string | null; sort: number; created_at: number; book_count: number }[]
-  return rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    icon: row.icon,
-    sort: row.sort,
-    bookCount: row.book_count,
-    createdAt: row.created_at
-  }))
-}
-
-export function getShelf(db: Db, shelfId: string): import('@shared/dto').ShelfDTO | null {
-  return listShelves(db).find((shelf) => shelf.id === shelfId) ?? null
-}
+/**
+ * 书架（`shelves` / `shelf_books`）的读写全部搬到了 `repositories/shelves.ts`（M3-02）：
+ * 那边有 CRUD、架内排序与「删书架不删书」的约束，放在这里会和「书」的查询逻辑搅在一起。
+ */
 
 /**
  * 收藏开关（M3-01）。

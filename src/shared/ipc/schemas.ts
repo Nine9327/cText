@@ -67,7 +67,7 @@ export const ipcSchemas = {
     /** 字段用 allowlist：ORDER BY 的列名不能来自用户输入 */
     sort: z
       .object({
-        field: z.enum(['lastReadAt', 'title', 'author', 'progress', 'createdAt']),
+        field: z.enum(['lastReadAt', 'title', 'author', 'progress', 'createdAt', 'shelfOrder']),
         direction: z.enum(['asc', 'desc'])
       })
       .optional(),
@@ -89,6 +89,25 @@ export const ipcSchemas = {
 
   'shelves:get': z.object({ shelfId: idSchema }),
   'shelves:list': z.void(),
+  /** 书架名去掉首尾空白后不能为空：叫「  」的书架在侧栏里是一个看不见的空行 */
+  'shelves:create': z.object({ name: z.string().trim().min(1, '书架名不能为空').max(40, '书架名最多 40 字') }),
+  'shelves:rename': z.object({
+    shelfId: idSchema,
+    name: z.string().trim().min(1, '书架名不能为空').max(40, '书架名最多 40 字')
+  }),
+  'shelves:remove': z.object({ shelfId: idSchema }),
+  'shelves:addBooks': z.object({
+    shelfId: idSchema,
+    // 上限 500：与 M3-05 的批量操作同一个口径，再大就该走后台任务
+    bookIds: z.array(idSchema).min(1).max(500)
+  }),
+  'shelves:removeBooks': z.object({ shelfId: idSchema, bookIds: z.array(idSchema).min(1).max(500) }),
+  'shelves:moveBook': z.object({
+    shelfId: idSchema,
+    bookId: idSchema,
+    toIndex: z.number().int().min(0).max(100_000)
+  }),
+  'shelves:reorder': z.object({ shelfIds: z.array(idSchema).max(500) }),
 
   // 阅读器（M2-01 / 目录 M2-06）
   'reader:content': z.object({

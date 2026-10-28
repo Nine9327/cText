@@ -67,10 +67,17 @@ export type IpcMap = {
   }
   'roots:remove': { input: { rootId: string }; output: void }
 
-  // 书架
+  // 书架（M3-02）。删除书架只删关联，不动 books 一行
   'shelves:list': { input: void; output: ShelfDTO[] }
   'shelves:create': { input: { name: string }; output: ShelfDTO }
-  'shelves:addBooks': { input: { shelfId: string; bookIds: string[] }; output: void }
+  'shelves:rename': { input: { shelfId: string; name: string }; output: ShelfDTO | null }
+  'shelves:remove': { input: { shelfId: string }; output: void }
+  'shelves:addBooks': { input: { shelfId: string; bookIds: string[] }; output: { added: number } }
+  'shelves:removeBooks': { input: { shelfId: string; bookIds: string[] }; output: { removed: number } }
+  /** 架内排序：把一本书移到第 `toIndex` 位（0 基），服务端负责整体重排 */
+  'shelves:moveBook': { input: { shelfId: string; bookId: string; toIndex: number }; output: void }
+  /** 侧栏书架排序：传完整 id 序列，服务端按数组下标写 sort */
+  'shelves:reorder': { input: { shelfIds: string[] }; output: void }
   'shelves:get': { input: { shelfId: string }; output: ShelfDTO | null }
 
   // 书籍列表（M1-08，排序由 M1-09 扩展）

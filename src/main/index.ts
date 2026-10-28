@@ -12,6 +12,7 @@ import { installIpc } from './ipc/registry'
 import { runIpcSmoke } from './ipc/smoke'
 import { registerRootsIpc } from './ipc/roots'
 import { registerBooksIpc } from './ipc/books'
+import { registerShelvesIpc } from './ipc/shelves'
 import { registerReaderIpc } from './ipc/reader'
 import { registerSettingsIpc } from './ipc/settings'
 import { registerBookmarksIpc } from './ipc/bookmarks'
@@ -32,6 +33,7 @@ import { seedUiFixture } from './ui/ui-fixture'
 import { runListSmoke } from './ui/list-smoke'
 import { runSearchSmoke } from './ui/search-smoke'
 import { runFavoriteSmoke } from './ui/favorite-smoke'
+import { runShelfSmoke } from './ui/shelf-smoke'
 import { runReaderSmoke } from './reader/smoke'
 import { runReaderBigSmoke } from './reader/big-smoke'
 import { runReaderUiSmoke } from './reader/ui-smoke'
@@ -282,6 +284,7 @@ if (!gotLock) {
     registerLogIpc()
     registerRootsIpc()
     registerBooksIpc()
+    registerShelvesIpc()
     registerImportIpc()
     registerReaderIpc()
     registerSettingsIpc()
@@ -380,6 +383,12 @@ if (!gotLock) {
     // M3-01 自检：收藏（纯标记不改缓存版本号 / 星标 / 侧栏计数 / 收藏页移除）
     if (!app.isPackaged && mainWindow && process.env['CTEXT_FAVORITE_SMOKE'] === '1') {
       await runFavoriteSmoke(mainWindow)
+      return
+    }
+
+    // M3-02 自检：书架（CRUD / 架内顺序 / 拖书入架 / 删除不删书）
+    if (!app.isPackaged && mainWindow && process.env['CTEXT_SHELF_SMOKE'] === '1') {
+      await runShelfSmoke(mainWindow)
       return
     }
 
