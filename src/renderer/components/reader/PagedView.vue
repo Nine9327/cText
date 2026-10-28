@@ -202,7 +202,7 @@ function installProbe(): void {
         fontSize: `${typography.fontSize}px`,
         lineHeight: `${typography.lineHeight}`,
         letterSpacing: `${typography.letterSpacing}em`,
-        '--ct-para-gap': `${typography.paragraphGap}em`
+        '--ct-para-gap': `${typography.paragraphSpacing}em`
       }"
       v-html="html"
     />

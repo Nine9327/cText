@@ -223,6 +223,9 @@ function runSortChecks(): Check[] {
 }
 
 export async function runListSmoke(win: BrowserWindow): Promise<Check[]> {
+  // 关掉后台节流：自检窗口一旦被别的窗口遮住，Chromium 会把 rAF/定时器降到
+  // 每秒一两次，所有「点击后等一帧」的断言都会随机超时（同一份代码时好时坏）。
+  win.webContents.setBackgroundThrottling(false)
   const checks: Check[] = []
   const check = (name: string, ok: boolean, detail = '') => checks.push({ name, ok, detail })
 

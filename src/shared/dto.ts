@@ -345,7 +345,11 @@ export interface ReaderSettingsDTO {
   theme: ReaderTheme
   customBg: string | null
   customText: string | null
-  mode: ReaderMode
+  /**
+   * 阅读模式。`'auto'` = 按书籍格式取默认（EPUB 滚动 / TXT 分页）；
+   * 只有用户手动切过模式才会写成 `paged` / `scroll`。
+   */
+  mode: ReaderMode | 'auto'
   rememberProgress: boolean
 }
 

@@ -92,7 +92,59 @@ export const ipcSchemas = {
     bookId: idSchema,
     chapterIdx: z.number().int().min(0).max(1_000_000)
   }),
-  'reader:chapters': z.object({ bookId: idSchema })
+  'reader:chapters': z.object({ bookId: idSchema }),
+
+  // 设置（M2-07）。分区用 `.strict()`：键名写错要当场报错，
+  // 而不是「保存成功但什么都没变」——后者在设置页上极难查。
+  'settings:get': z.void(),
+  'settings:patch': z.object({
+    patch: z
+      .object({
+        general: z
+          .object({
+            autoLaunch: z.boolean().optional(),
+            minimizeToTray: z.boolean().optional(),
+            closeAction: z.enum(['tray', 'quit']).optional(),
+            language: z.literal('zh-CN').optional()
+          })
+          .strict()
+          .optional(),
+        reader: z
+          .object({
+            fontSize: z.number().min(12).max(32).optional(),
+            lineHeight: z.number().min(1.2).max(2.4).optional(),
+            letterSpacing: z.number().min(-0.05).max(0.3).optional(),
+            paragraphSpacing: z.number().min(0).max(2).optional(),
+            margin: z.number().min(16).max(200).optional(),
+            fontFamily: z.string().min(1).max(64).optional(),
+            theme: z.enum(['day', 'night', 'eye', 'paper', 'system']).optional(),
+            customBg: z
+              .string()
+              .regex(/^#[0-9a-fA-F]{6}$/, '颜色要写成 #rrggbb')
+              .nullable()
+              .optional(),
+            customText: z
+              .string()
+              .regex(/^#[0-9a-fA-F]{6}$/, '颜色要写成 #rrggbb')
+              .nullable()
+              .optional(),
+            mode: z.enum(['paged', 'scroll', 'auto']).optional(),
+            rememberProgress: z.boolean().optional()
+          })
+          .strict()
+          .optional(),
+        storage: z.object({ coverCacheLimitMb: z.number().int().min(64).max(8192) }).strict().optional(),
+        sources: z
+          .object({
+            complianceAccepted: z.boolean().optional(),
+            cacheTtlDays: z.number().int().min(1).max(90).optional()
+          })
+          .strict()
+          .optional(),
+        shortcuts: z.record(z.string().max(40), z.string().max(40)).optional()
+      })
+      .strict()
+  })
 } satisfies Partial<{ [K in keyof IpcMap]: z.ZodType<IpcMap[K]['input']> }>
 
 /** 有 schema 的通道 = 允许注册 handler 的通道 */

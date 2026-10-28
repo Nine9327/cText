@@ -19,13 +19,14 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import PagedView from '@/components/reader/PagedView.vue'
 import ScrollView from '@/components/reader/ScrollView.vue'
 import TocDrawer from '@/components/reader/TocDrawer.vue'
+import SettingsPanel from '@/components/reader/SettingsPanel.vue'
 import type { IconName } from '@/components/common/icons'
 import { call } from '@/api'
 import { ERROR_CODES } from '@shared/errors'
 import type { BookDetailDTO, ChapterContentDTO, ChapterDTO } from '@shared/dto'
 import type { PageSnapshot } from '@/reader/paginate'
 import type { ScrollSnapshot } from '@/reader/scroll'
-import { FONT_SIZE_MAX, FONT_SIZE_MIN, useReaderStore, type ReaderMode } from '@/stores/reader'
+import { useReaderStore, type ReaderMode } from '@/stores/reader'
 
 const route = useRoute()
 const router = useRouter()
@@ -53,7 +54,17 @@ const pending = ref(false)
 /** 目录（M2-06）：首次打开抽屉时才拉，进阅读器不该白跑一次 IPC */
 const chapters = ref<ChapterDTO[]>([])
 const tocOpen = ref(false)
+const settingsOpen = ref(false)
 let chaptersLoaded = false
+
+/**
+ * 当前配色。'system' 主题要看系统深浅色，而 Chromium 会跟着系统走，
+ * 所以用 matchMedia 而不是自己判断（自己判断迟早和系统设置对不上）。
+ */
+const systemDark = ref(false)
+let themeQuery: MediaQueryList | null = null
+
+const palette = computed(() => reader.palette(systemDark.value))
 
 interface PanelError {
   icon: IconName
@@ -300,8 +311,9 @@ function onKeydown(event: KeyboardEvent): void {
       break
     case 'Escape':
       event.preventDefault()
-      // 抽屉开着时 Esc 只关抽屉：读者的意图是「退出目录」，不是「退出阅读」
-      if (tocOpen.value) tocOpen.value = false
+      // 浮层开着时 Esc 只关浮层：读者的意图是「退出目录/面板」，不是「退出阅读」
+      if (settingsOpen.value) settingsOpen.value = false
+      else if (tocOpen.value) tocOpen.value = false
       else void router.push('/library')
       break
     default:
@@ -311,8 +323,18 @@ function onKeydown(event: KeyboardEvent): void {
 
 // ---------------------------------------------------------------- 生命周期
 
+function onSystemTheme(event: MediaQueryListEvent): void {
+  systemDark.value = event.matches
+}
+
 onMounted(async () => {
   window.addEventListener('keydown', onKeydown)
+  themeQuery = window.matchMedia('(prefers-color-scheme: dark)')
+  systemDark.value = themeQuery.matches
+  themeQuery.addEventListener('change', onSystemTheme)
+
+  // 先把设置读回来再渲染正文：否则会先用默认字号排一次版，再跳成用户的字号
+  await reader.load()
   if (!(await loadBook())) return
   if (!book.value || book.value.chapterCount <= 0) {
     // 空文件 / 解析出 0 章的样本：留在骨架上等一个永远不来的正文最难排查
@@ -328,7 +350,11 @@ onMounted(async () => {
   await loadChapter(Number.isFinite(fromQuery) && fromQuery > 0 ? fromQuery : 0)
 })
 
-onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown)
+  themeQuery?.removeEventListener('change', onSystemTheme)
+  themeQuery = null
+})
 
 // 同一组件实例内切换书（书架里连点两本）时重新加载
 watch(bookId, async () => {
@@ -338,6 +364,7 @@ watch(bookId, async () => {
   chapters.value = []
   chaptersLoaded = false
   tocOpen.value = false
+  settingsOpen.value = false
   if (await loadBook()) await loadChapter(0)
 })
 </script>
@@ -380,37 +407,29 @@ watch(bookId, async () => {
         <span class="min-w-[52px] text-right text-[11.5px] tabular-nums text-faint" data-reader-page>
           {{ chapter ? pageLabel : '' }}
         </span>
-        <button
-          class="ct-icon-btn"
-          title="减小字号（Ctrl+-）"
-          data-font-down
-          :disabled="reader.typography.fontSize <= FONT_SIZE_MIN"
-          @click="reader.stepFontSize(-1)"
-        >
-          <span class="text-[11px] leading-none">A−</span>
-        </button>
-        <button
-          class="ct-icon-btn"
-          title="增大字号（Ctrl+=）"
-          data-font-up
-          :disabled="reader.typography.fontSize >= FONT_SIZE_MAX"
-          @click="reader.stepFontSize(1)"
-        >
-          <span class="text-[13px] leading-none">A+</span>
+        <button class="ct-icon-btn" title="排版与主题" data-reader-settings @click="settingsOpen = !settingsOpen">
+          <AppIcon name="settings" :size="15" />
         </button>
       </div>
     </header>
 
     <!-- 正文舞台：浅色纸面 + 页边距，视口铺满内部 -->
-    <main class="relative min-h-0 flex-1 overflow-hidden bg-[#f7f5ef]">
+    <main
+      class="relative min-h-0 flex-1 overflow-hidden transition-colors duration-200"
+      data-reader-stage-outer
+      :style="{ background: palette.bg }"
+    >
       <div
-        class="absolute inset-0 text-[#2b2b2b]"
+        class="absolute inset-0"
         data-reader-stage
         :style="{
-          paddingLeft: `${reader.typography.marginX}px`,
-          paddingRight: `${reader.typography.marginX}px`,
-          paddingTop: `${reader.typography.marginY}px`,
-          paddingBottom: `${reader.typography.marginY}px`
+          background: palette.bg,
+          color: palette.text,
+          fontFamily: reader.fontStack(),
+          paddingLeft: `${reader.typography.margin}px`,
+          paddingRight: `${reader.typography.margin}px`,
+          paddingTop: `${reader.verticalMargin()}px`,
+          paddingBottom: `${reader.verticalMargin()}px`
         }"
       >
         <!-- 两种模式互斥渲染：key 带上模式，切换时整块重建，位置由 entryOffset 带过去 -->
@@ -460,6 +479,8 @@ watch(bookId, async () => {
         <div class="h-full w-1/3 animate-pulse bg-accent/70" />
       </div>
     </main>
+
+    <SettingsPanel :open="settingsOpen" @close="settingsOpen = false" />
 
     <TocDrawer
       :open="tocOpen"

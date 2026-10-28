@@ -41,7 +41,8 @@
     "verify:m1": "node scripts/verify-m1.mjs",
     "verify:reader": "node scripts/verify-reader.mjs",
     "verify:reader:big": "node scripts/verify-reader-big.mjs",
-    "verify:reader:ui": "node scripts/verify-reader-ui.mjs"
+    "verify:reader:ui": "node scripts/verify-reader-ui.mjs",
+    "verify:settings": "node scripts/verify-settings.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

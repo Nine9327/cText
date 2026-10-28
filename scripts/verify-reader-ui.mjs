@@ -83,14 +83,13 @@ function runSmoke(scratch) {
     child.stdout.on('data', (d) => (out += d))
     child.stderr.on('data', (d) => (out += d))
 
-    const timer = setTimeout(() => {
-      child.kill()
-      record('分页检查在 120s 内完成', false, '超时，可能是渲染层没起来或分页死循环')
-      resolve()
-    }, 120_000)
-
-    child.on('exit', (code) => {
-      clearTimeout(timer)
+    // 收尾时把**已经收到的**断言全部计入结果。
+    // 之前超时分支直接 record('超时') 就 resolve，把已经跑过的几十条断言全丢了——
+    // 表现成「0/1 项通过、一条输出都没有」，看起来像渲染层没起来，其实是跑得慢。
+    let flushed = false
+    const flush = (exitCode) => {
+      if (flushed) return
+      flushed = true
       const lines = out.split(/\r?\n/).filter((l) => /^SMOKE READERUI (PASS|FAIL) /.test(l))
       for (const line of lines) {
         const ok = line.startsWith('SMOKE READERUI PASS')
@@ -100,8 +99,20 @@ function runSmoke(scratch) {
       }
       if (lines.length === 0) {
         const tail = out.split(/\r?\n/).slice(-14).join(' / ')
-        record('分页检查产出结果', false, `进程退出码 ${code}，无断言输出：${tail}`)
+        record('分页检查产出结果', false, `进程退出码 ${exitCode}，无断言输出：${tail}`)
       }
+    }
+
+    const timer = setTimeout(() => {
+      record('分页检查在 240s 内完成', false, '超时（下面列出超时前已跑完的断言）')
+      flush('timeout')
+      child.kill()
+      resolve()
+    }, 240_000)
+
+    child.on('exit', (code) => {
+      clearTimeout(timer)
+      flush(code)
       resolve()
     })
   })

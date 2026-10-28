@@ -13,6 +13,7 @@ import { runIpcSmoke } from './ipc/smoke'
 import { registerRootsIpc } from './ipc/roots'
 import { registerBooksIpc } from './ipc/books'
 import { registerReaderIpc } from './ipc/reader'
+import { registerSettingsIpc } from './ipc/settings'
 import { installAssetProtocol, registerAssetScheme } from './protocol/assets'
 import { registerImportIpc } from './ipc/import'
 import { registerSystemIpc } from './ipc/system'
@@ -32,6 +33,7 @@ import { runSearchSmoke } from './ui/search-smoke'
 import { runReaderSmoke } from './reader/smoke'
 import { runReaderBigSmoke } from './reader/big-smoke'
 import { runReaderUiSmoke } from './reader/ui-smoke'
+import { runSettingsSmoke } from './settings/smoke'
 import { runM1Smoke } from './milestone/m1-smoke'
 import { runImportUiSmoke } from './ui/import-ui-smoke'
 import {
@@ -278,6 +280,7 @@ if (!gotLock) {
     registerBooksIpc()
     registerImportIpc()
     registerReaderIpc()
+    registerSettingsIpc()
     installAssetProtocol()
     installIpc()
 
@@ -366,6 +369,12 @@ if (!gotLock) {
     // M1-10 自检：搜索（FTS 前缀命中 / 索引同步 / 200ms 防抖 / 离线标注）
     if (!app.isPackaged && mainWindow && process.env['CTEXT_SEARCH_SMOKE'] === '1') {
       await runSearchSmoke(mainWindow)
+      return
+    }
+
+    // M2-07 自检：设置读写（默认值 / 合并语义 / 分区隔离 / 坏数据容错 / 入参校验）
+    if (!app.isPackaged && process.env['CTEXT_SETTINGS_SMOKE'] === '1') {
+      runSettingsSmoke()
       return
     }
 

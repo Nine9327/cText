@@ -19,6 +19,7 @@ import { app, type BrowserWindow } from 'electron'
 import { getDb } from '../db/connection'
 import { coversDir } from '../ipc/import'
 import { getTaskSnapshot, startImport } from '../library/import-task'
+import { loadSettings } from '../db/repositories/settings'
 
 export interface Check {
   name: string
@@ -121,6 +122,11 @@ export async function runReaderUiSmoke(win: BrowserWindow, dir: string): Promise
 type CheckFn = (name: string, ok: boolean, detail?: string) => void
 
 async function scenario(win: BrowserWindow, dir: string, check: CheckFn): Promise<void> {
+  // 关掉后台节流：窗口一旦被别的窗口遮住，Chromium 会把 rAF 降到每秒一两次，
+  // 于是「改字号后重排」被拖到几秒、翻页也不生效。自动化测试必须关掉它，
+  // 否则同一份代码在「窗口在前台」和「被遮住」时跑出两种结果。
+  win.webContents.setBackgroundThrottling(false)
+
   // 窗口尺寸先固定：分页结果与视口大小强相关，不定死的话基线会随环境漂
   win.setSize(1280, 860)
   await sleep(300)
@@ -225,11 +231,17 @@ async function scenario(win: BrowserWindow, dir: string, check: CheckFn): Promis
   check('跳到第 3 页（为改字号准备锚点）', before.page === 2 && before.offset > 0, `page=${before.page} offset=${before.offset}`)
 
   const fontSizeBefore = before.fontSize
+  // 字号控件在排版面板里（M2-07）：面板是覆盖层，不改变正文容器宽度，
+  // 所以这一段的「改字号 → 重排 → 位置不跳」结论不受面板开合影响
   await run(win, `
+    q('[data-reader-settings]').click()
+    await sleep(250)
     for (let i = 0; i < 3; i += 1) {
       q('[data-font-up]').click()
       await sleep(120)
     }
+    q('[data-settings-close]').click()
+    await sleep(250)
     return true
   `)
   await sleep(250)
@@ -265,8 +277,15 @@ async function scenario(win: BrowserWindow, dir: string, check: CheckFn): Promis
 
   // ---------------------------------------------------------------- 窗口缩放
   const anchor2 = zoomed.offset
+  const geometryBefore = (await run(win, 'return JSON.stringify(window.__ctextReader.geometry())')) as string
   win.setSize(980, 700)
-  await sleep(450)
+  // 等视口真的变了再断言：setSize 不是同步生效的（窗口动画、系统负载都会推迟），
+  // 固定 sleep 450ms 在忙的时候会读到旧尺寸，把「没缩放」误判成「位置跳了」
+  await waitUntil(async () => {
+    const now = (await run(win, 'return JSON.stringify(window.__ctextReader.geometry())')) as string
+    return now !== geometryBefore ? true : null
+  }, 5000)
+  await sleep(250)
   const resized = await stateOf(win)
   const resizeCheck = JSON.parse(
     (await run(win, `
@@ -390,12 +409,17 @@ async function scenario(win: BrowserWindow, dir: string, check: CheckFn): Promis
   if (thousand) {
     await run(win, `location.hash = '#/reader/${thousand.id}'; return true`)
     await waitUntil(async () => ((await readerTitle(win)).includes('千章样本') ? true : null), 10_000)
-    // 首章是「第1卷」这个卷标题，正文只有一行；这里顺带确认正文真的渲染出来了
-    const firstBody = (await run(win, `
-      const el = q('[data-scroll-content]') || q('[data-page-content]')
-      return el ? el.textContent.trim() : ''
-    `)) as string
-    check('千章样本首章渲染出正文', firstBody.length > 0, firstBody.slice(0, 30) || '正文为空')
+    // 首章是「第1卷」这个卷标题，正文只有一行；这里顺带确认正文真的渲染出来了。
+    // 标题在 `library:get` 返回时就变了，正文要等 `reader:content`——所以要轮询正文，
+    // 只等标题会读到「容器还不存在」的那一帧。
+    const firstBody = await waitUntil(async () => {
+      const text = (await run(win, `
+        const el = q('[data-scroll-content]') || q('[data-page-content]')
+        return el ? el.textContent.trim() : ''
+      `)) as string
+      return text.length > 0 ? text : null
+    }, 8000)
+    check('千章样本首章渲染出正文', !!firstBody, firstBody ? firstBody.slice(0, 30) : '8s 内正文仍为空')
 
     await run(win, `q('[data-reader-toc]').click(); return true`)
 
@@ -417,18 +441,26 @@ async function scenario(win: BrowserWindow, dir: string, check: CheckFn): Promis
     if (shot) writeFileSync(shot.replace(/\.png$/i, '-toc.png'), (await win.capturePage()).toPNG())
 
     // 滚到底：DOM 行数不能跟着总数涨，且能滚到最后一条
-    const bottom = await run(win, `
-      const box = q('[data-toc-total]')
-      box.scrollTop = box.scrollHeight
-      await sleep(200)
-      const rows = qa('[data-toc-row]')
-      const last = rows[rows.length - 1]
-      return JSON.stringify({
-        rows: rows.length,
-        last: last ? Number(last.dataset.tocRow) : -1,
-        lastText: last ? txt(last) : ''
-      })
-    `)
+    // 滚到底后轮询：虚拟滚动是 scroll 事件驱动的一帧更新，固定 sleep 在忙时会读到旧窗口
+    const bottom = (await (async () => {
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        const snapshot = (await run(win, `
+          const box = q('[data-toc-total]')
+          if (box.scrollTop !== box.scrollHeight) box.scrollTop = box.scrollHeight
+          await sleep(120)
+          const rows = qa('[data-toc-row]')
+          const last = rows[rows.length - 1]
+          return JSON.stringify({
+            rows: rows.length,
+            last: last ? Number(last.dataset.tocRow) : -1,
+            lastText: last ? txt(last) : ''
+          })
+        `)) as string
+        const parsed = JSON.parse(snapshot) as { rows: number; last: number; lastText: string }
+        if (parsed.last >= TOC_VOLUMES * (TOC_PER_VOLUME + 1) - 1) return snapshot
+      }
+      return (await run(win, `return JSON.stringify({ rows: 0, last: -1, lastText: '' })`)) as string
+    })())
     const bottomState = JSON.parse(bottom as string) as { rows: number; last: number; lastText: string }
     check(
       '滚到目录末尾：DOM 行数仍受限，且能到最后一条',
@@ -529,6 +561,142 @@ async function scenario(win: BrowserWindow, dir: string, check: CheckFn): Promis
     check('重开目录：当前章高亮且自动滚到可视区', active === jumped.idx, `高亮 idx=${active} / 跳转 idx=${jumped.idx}`)
     await run(win, `q('[data-toc-close]').click(); await sleep(200); return true`)
   }
+
+  // ---------------------------------------------------------------- 排版与主题（M2-07）
+  await run(win, `location.hash = '#/reader/${row.id}'; return true`)
+  await waitUntil(async () => ((await readerTitle(win)).includes('分页样本') ? true : null), 10_000)
+  // 上一节把模式切成了滚动，这里切回分页：本节的断言都基于分页容器
+  await run(win, `q('[data-mode="paged"]').click(); await sleep(300); return true`)
+  await run(win, `q('[data-reader-settings]').click(); await sleep(250); return true`)
+  check(
+    '排版面板可打开',
+    (await run(win, `return !!q('[data-settings-panel]')`)) === true,
+    '未出现 [data-settings-panel]'
+  )
+
+  // 面板里的控件不能溢出窗口：主题色块有 5 个，最容易在窄面板里被挤出去
+  const overflow = JSON.parse(
+    (await run(win, `
+      const aside = q('[data-settings-panel] aside')
+      const buttons = qa('[data-theme]')
+      const inner = window.innerWidth
+      return JSON.stringify({
+        inner,
+        asideRight: Math.round(aside.getBoundingClientRect().right),
+        asideWidth: Math.round(aside.getBoundingClientRect().width),
+        worstRight: Math.round(Math.max(...buttons.map((b) => b.getBoundingClientRect().right))),
+        lastLabel: buttons.length ? txt(buttons[buttons.length - 1]) : ''
+      })
+    `)) as string
+  ) as { inner: number; asideRight: number; asideWidth: number; worstRight: number; lastLabel: string }
+  check(
+    '排版面板不溢出窗口（5 个主题色块都完整可见）',
+    overflow.asideRight <= overflow.inner && overflow.worstRight <= overflow.inner,
+    `窗口 ${overflow.inner} / 面板宽 ${overflow.asideWidth} 右缘 ${overflow.asideRight} / 最后一个色块右缘 ${overflow.worstRight}`
+  )
+
+  const stageBg = async (): Promise<string> =>
+    (await run(win, `return getComputedStyle(q('[data-reader-stage]')).backgroundColor`)) as string
+
+  await run(win, `q('[data-theme="night"]').click(); await sleep(300); return true`)
+  const nightBg = await stageBg()
+  check('主题实时生效：夜间背景变深', nightBg === 'rgb(23, 24, 27)', nightBg)
+
+  // 上一节改过字号（18 → 21）并已落库，这里按「相对 +1px」断言，不写死绝对值
+  const fontBefore = (await run(win, `return parseFloat(getComputedStyle(q('[data-page-content]')).fontSize)`)) as number
+  await run(win, `q('[data-font-up]').click(); await sleep(250); return true`)
+  const zoomedFont = (await run(win, `return parseFloat(getComputedStyle(q('[data-page-content]')).fontSize` + `)`)) as number
+  check(
+    '字号实时生效（点一次 +1px）',
+    zoomedFont === fontBefore + 1,
+    `${fontBefore}px → ${zoomedFont}px`
+  )
+
+  // 行距用 range 驱动：值 + input 事件就是用户拖动滑块的等价路径
+  await run(win, `
+    const el = q('[data-range="lineHeight"]')
+    el.value = '2.2'
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    await sleep(300)
+    return true
+  `)
+  const lineHeightPx = (await run(win, `
+    const el = q('[data-page-content]')
+    return parseFloat(getComputedStyle(el).lineHeight) / parseFloat(getComputedStyle(el).fontSize)
+  `)) as number
+  check('行距实时生效：1.9 → 2.2 倍', Math.abs(lineHeightPx - 2.2) < 0.05, `${lineHeightPx.toFixed(2)} 倍`)
+
+  await run(win, `
+    const el = q('[data-range="margin"]')
+    el.value = '40'
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    await sleep(300)
+    return true
+  `)
+  const marginLeft = (await run(win, `return Math.round(q('[data-page-content]').getBoundingClientRect().left)`)) as number
+  check('页边距实时生效：64 → 40px', marginLeft === 40, `左边距 ${marginLeft}px`)
+
+  // 自定义色叠加在主题之上
+  await run(win, `
+    const el = q('[data-custom-bg]')
+    el.value = '#102030'
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    await sleep(250)
+    return true
+  `)
+  const customBg = await stageBg()
+  await run(win, `q('[data-custom-clear]').click(); await sleep(250); return true`)
+  const clearedBg = await stageBg()
+  check(
+    '自定义背景色覆盖主题，且能一键回到主题色',
+    customBg === 'rgb(16, 32, 48)' && clearedBg === nightBg,
+    `${customBg} → ${clearedBg}`
+  )
+
+  // 落库：等过 300ms 的节流窗口，再由主进程直接读库（不经过渲染层的任何缓存）
+  await sleep(600)
+  const saved = loadSettings(getDb()).reader
+  check(
+    '设置已落库（字号/行距/页边距/主题）',
+    saved.fontSize === zoomedFont &&
+      Math.abs(saved.lineHeight - 2.2) < 0.001 &&
+      saved.margin === 40 &&
+      saved.theme === 'night',
+    `fontSize=${saved.fontSize}（期望 ${zoomedFont}） lineHeight=${saved.lineHeight} margin=${saved.margin} theme=${saved.theme}`
+  )
+
+  if (shot) writeFileSync(shot.replace(/\.png$/i, '-night.png'), (await win.capturePage()).toPNG())
+
+  // 重新加载渲染层 ≈ 重开应用：设置要能自己回来（这一段没有探针，只看 DOM）
+  //
+  // 必须等导航结束再注入脚本：页面正在换帧时 executeJavaScript 可能既不 resolve
+  // 也不 reject，整段自检就挂在那里（表现成「跑到一半没有任何输出」）。
+  await new Promise<void>((resolve) => {
+    const done = (): void => resolve()
+    win.webContents.once('did-finish-load', done)
+    win.webContents.reload()
+    setTimeout(done, 10_000)
+  })
+  const restored = await waitUntil(async () => {
+    const state = (await run(win, `
+      const content = q('[data-page-content]') || q('[data-scroll-content]')
+      const stage = q('[data-reader-stage]')
+      if (!content || !stage) return null
+      const text = txt(q('[data-reader-title]'))
+      if (!text.includes('分页样本')) return null
+      return JSON.stringify({
+        font: getComputedStyle(content).fontSize,
+        bg: getComputedStyle(stage).backgroundColor,
+        left: Math.round(content.getBoundingClientRect().left)
+      })
+    `)) as string
+    return state ? (JSON.parse(state) as { font: string; bg: string; left: number }) : null
+  }, 15_000)
+  check(
+    '重启后设置自动恢复（字号/主题/页边距）',
+    restored?.font === `${zoomedFont}px` && restored.bg === 'rgb(23, 24, 27)' && restored.left === 40,
+    restored ? `font=${restored.font}（期望 ${zoomedFont}px） bg=${restored.bg} left=${restored.left}px` : '15s 内没重新进入阅读器'
+  )
 
   // ---------------------------------------------------------------- 退出
   await run(win, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await sleep(200); return true`)
