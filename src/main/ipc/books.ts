@@ -14,7 +14,14 @@
 import type { BookDTO, Paged } from '@shared/dto'
 import { AppError, ERROR_CODES } from '@shared/errors'
 import { getDb } from '../db/connection'
-import { countBooks, getBookDetail, listBooks, recentBooks, setFavorite } from '../db/repositories/books'
+import {
+  countBooks,
+  getBookDetail,
+  listBooks,
+  recentBooks,
+  setFavorite,
+  updateBookMeta
+} from '../db/repositories/books'
 import { relocateBookFile } from '../library/relocate'
 import { registerHandler } from './registry'
 
@@ -76,5 +83,13 @@ export function registerBooksIpc(): void {
       throw new AppError(ERROR_CODES.notFound, '这本书已不在书库中，请刷新列表')
     }
   })
+  /** 元信息编辑（M3-04）：改完回传整份详情，渲染层不用再拉一次 */
+  registerHandler('library:update', ({ id, patch }) => {
+    if (!updateBookMeta(getDb(), id, patch)) {
+      throw new AppError(ERROR_CODES.notFound, '这本书已不在书库中，请刷新列表')
+    }
+    return getBookDetail(getDb(), id)
+  })
+
   // 书架相关通道在 ipc/shelves.ts（M3-02）
 }

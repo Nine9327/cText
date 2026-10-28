@@ -56,6 +56,22 @@ export type IpcMap = {
   'library:get': { input: { id: string }; output: BookDetailDTO | null }
   'library:toggleFavorite': { input: { id: string; value: boolean }; output: void }
   'library:setCategories': { input: { id: string; categoryIds: string[] }; output: void }
+  /** 元信息编辑（M3-04）：只给要改的字段，未传的保持原值 */
+  'library:update': {
+    input: {
+      id: string
+      patch: {
+        title?: string
+        author?: string | null
+        series?: string | null
+        intro?: string | null
+        publisher?: string | null
+        pubDate?: string | null
+        language?: string | null
+      }
+    }
+    output: BookDetailDTO | null
+  }
   'library:remove': { input: { id: string; deleteFile: boolean }; output: void }
 
   // 根目录

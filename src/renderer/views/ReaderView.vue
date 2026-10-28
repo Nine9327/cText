@@ -625,10 +625,13 @@ onMounted(async () => {
     }
     return
   }
-  // 恢复优先级：URL 里的章号（目录跳转/分享链接）> 上次读到的位置 > 第 1 章
+  // 恢复优先级：URL 里的章号（目录跳转 / 书签链接 / 分享链接）> 上次读到的位置 > 第 1 章。
+  // `?offset=` 是章内字符偏移——书签与划线汇总从详情页跳过来时必须带它，
+  // 否则「跳到那条划线」只能跳到那一章的开头。
   const fromQuery = Number(route.query['chapter'] ?? 0)
   if (Number.isFinite(fromQuery) && fromQuery > 0) {
-    await loadChapter(fromQuery)
+    const offset = Number(route.query['offset'] ?? 0)
+    await loadChapter(fromQuery, Number.isFinite(offset) && offset > 0 ? offset : 0)
     return
   }
 
@@ -660,11 +663,14 @@ onBeforeUnmount(() => {
  * 否则「同一本书里换章号」的链接会静默无效。
  */
 watch(
-  () => route.query['chapter'],
-  (value) => {
-    const idx = Number(value ?? 0)
-    if (!Number.isFinite(idx) || idx < 0 || idx === chapterIdx.value) return
-    void loadChapter(idx)
+  () => `${route.query['chapter'] ?? ''}:${route.query['offset'] ?? ''}`,
+  () => {
+    const idx = Number(route.query['chapter'] ?? 0)
+    if (!Number.isFinite(idx) || idx < 0) return
+    const offset = Number(route.query['offset'] ?? 0) || 0
+    // 同一章内换偏移（点另一条书签）也要重新定位
+    if (idx === chapterIdx.value && (offset === 0 || offset === entryOffset.value)) return
+    void loadChapter(idx, offset)
   }
 )
 

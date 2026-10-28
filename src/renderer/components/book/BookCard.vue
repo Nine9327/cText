@@ -39,7 +39,13 @@ const props = withDefaults(
  * `favorite` / `remove` 只报告「用户点了」，真正的写入在调用方（store），
  * 卡片不持状态，免得乐观更新与真实结果打架。
  */
-const emit = defineEmits<{ (e: 'open'): void; (e: 'favorite'): void; (e: 'remove'): void }>()
+const emit = defineEmits<{
+  (e: 'open'): void
+  (e: 'favorite'): void
+  (e: 'remove'): void
+  /** 打开详情页（M3-04）。卡片点击仍是「直接读」，详情走这个独立按钮 */
+  (e: 'detail'): void
+}>()
 
 const isOffline = computed(() => props.book.offline)
 
@@ -181,8 +187,19 @@ function onDragStart(event: DragEvent): void {
       <span class="w-20 shrink-0 text-right text-[11px] text-faint">{{ statusText }}</span>
     </button>
 
-    <!-- 动作按钮：星标 + 移出书架 -->
+    <!-- 动作按钮：详情 + 星标 + 移出书架 -->
     <div class="absolute flex gap-1" :class="actionsClass">
+      <button
+        type="button"
+        class="ct-fav-btn opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+        title="书籍详情"
+        aria-label="书籍详情"
+        data-book-detail
+        @click.stop="emit('detail')"
+      >
+        <AppIcon name="info" :size="13" />
+      </button>
+
       <button
         type="button"
         class="ct-fav-btn"

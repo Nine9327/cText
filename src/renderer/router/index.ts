@@ -4,6 +4,7 @@ import ShelvesView from '@/views/ShelvesView.vue'
 import SourcesView from '@/views/SourcesView.vue'
 import ComingSoonView from '@/views/ComingSoonView.vue'
 import ReaderView from '@/views/ReaderView.vue'
+import BookDetailView from '@/views/BookDetailView.vue'
 
 /**
  * 路由表。五个侧栏入口各有独立去处（对齐产品文档 §2.2）：
@@ -53,6 +54,12 @@ export const router = createRouter({
       name: 'source',
       component: SourcesView,
       meta: { title: '网络小说' }
+    },
+    {
+      path: '/book/:bookId',
+      name: 'book',
+      component: BookDetailView,
+      meta: { title: '书籍详情' }
     },
     {
       path: '/reader/:bookId',

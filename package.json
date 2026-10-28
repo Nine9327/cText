@@ -47,7 +47,8 @@
     "verify:m2": "node scripts/verify-m2.mjs",
     "verify:favorite": "node scripts/verify-favorite.mjs",
     "verify:shelf": "node scripts/verify-shelf.mjs",
-    "verify:category": "node scripts/verify-category.mjs"
+    "verify:category": "node scripts/verify-category.mjs",
+    "verify:detail": "node scripts/verify-detail.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

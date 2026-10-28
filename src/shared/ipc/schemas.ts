@@ -89,6 +89,21 @@ export const ipcSchemas = {
   'library:get': z.object({ id: idSchema }),
   /** 收藏开关（M3-01）：传目标值而不是「切换」，重试幂等 */
   'library:toggleFavorite': z.object({ id: idSchema, value: z.boolean() }),
+  /** 元信息编辑（M3-04）。长度上限按「能显示得下」定，不是按数据库能力 */
+  'library:update': z.object({
+    id: idSchema,
+    patch: z
+      .object({
+        title: z.string().trim().min(1, '书名不能为空').max(200, '书名最多 200 字').optional(),
+        author: z.string().max(100, '作者最多 100 字').nullable().optional(),
+        series: z.string().max(100, '系列最多 100 字').nullable().optional(),
+        intro: z.string().max(5000, '简介最多 5000 字').nullable().optional(),
+        publisher: z.string().max(100).nullable().optional(),
+        pubDate: z.string().max(40).nullable().optional(),
+        language: z.string().max(40).nullable().optional()
+      })
+      .strict()
+  }),
   /** 整体替换一本书的分类（M3-03）：传完整列表，空数组 = 清空标签 */
   'library:setCategories': z.object({ id: idSchema, categoryIds: z.array(idSchema).max(32) }),
 

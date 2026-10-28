@@ -378,6 +378,57 @@ export function countBooks(
  */
 
 /**
+ * 元信息编辑（M3-04）。
+ *
+ * **不碰 `updated_at`**：它是阅读器章节缓存的版本号，改书名不该让整章缓存作废。
+ * 但 FTS 索引必须跟着变——`books_fts_au` 触发器盯着 title/author/intro 三列，
+ * 所以「改完书名能立刻搜到」是触发器保证的，不需要业务代码再写索引。
+ *
+ * 空字符串一律存成 NULL：`title` 有 NOT NULL，其余字段空串与 NULL 在界面上
+ * 没有区别，但会让「有没有这个信息」的判断分裂成两套。
+ */
+export interface BookMetaPatch {
+  title?: string
+  author?: string | null
+  series?: string | null
+  intro?: string | null
+  publisher?: string | null
+  pubDate?: string | null
+  language?: string | null
+}
+
+export function updateBookMeta(db: Db, id: string, patch: BookMetaPatch): boolean {
+  const current = db
+    .prepare('SELECT title, author, series, intro, publisher, pub_date, language FROM books WHERE id = ? AND deleted_at IS NULL')
+    .get(id) as
+    | { title: string; author: string | null; series: string | null; intro: string | null; publisher: string | null; pub_date: string | null; language: string | null }
+    | undefined
+  if (!current) return false
+
+  const text = (value: string | null | undefined, fallback: string | null): string | null => {
+    if (value === undefined) return fallback
+    const trimmed = value === null ? '' : value.trim()
+    return trimmed === '' ? null : trimmed
+  }
+
+  const title = text(patch.title, current.title) ?? current.title
+  db.prepare(
+    `UPDATE books SET title = ?, author = ?, series = ?, intro = ?, publisher = ?, pub_date = ?, language = ?
+     WHERE id = ?`
+  ).run(
+    title,
+    text(patch.author, current.author),
+    text(patch.series, current.series),
+    text(patch.intro, current.intro),
+    text(patch.publisher, current.publisher),
+    text(patch.pubDate, current.pub_date),
+    text(patch.language, current.language),
+    id
+  )
+  return true
+}
+
+/**
  * 收藏开关（M3-01）。
  *
  * **不碰 `updated_at`**：它是阅读器章节缓存的版本号（`bookId:idx:updated_at`），

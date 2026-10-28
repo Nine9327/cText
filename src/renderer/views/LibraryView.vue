@@ -455,6 +455,7 @@ watch(
                 @open="openBook(book)"
                 @favorite="toggleFavorite(book)"
                 @remove="removeFromShelf(book)"
+                @detail="router.push(`/book/${book.id}`)"
               />
             </div>
           </div>

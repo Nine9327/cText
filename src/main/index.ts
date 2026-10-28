@@ -36,6 +36,7 @@ import { runSearchSmoke } from './ui/search-smoke'
 import { runFavoriteSmoke } from './ui/favorite-smoke'
 import { runShelfSmoke } from './ui/shelf-smoke'
 import { runCategorySmoke } from './ui/category-smoke'
+import { runDetailSmoke } from './ui/detail-smoke'
 import { runReaderSmoke } from './reader/smoke'
 import { runReaderBigSmoke } from './reader/big-smoke'
 import { runReaderUiSmoke } from './reader/ui-smoke'
@@ -398,6 +399,12 @@ if (!gotLock) {
     // M3-03 自检：分类（多对多 / 筛选 OR / 与排序叠加 / CRUD）
     if (!app.isPackaged && mainWindow && process.env['CTEXT_CATEGORY_SMOKE'] === '1') {
       await runCategorySmoke(mainWindow)
+      return
+    }
+
+    // M3-04 自检：书籍详情（元信息编辑 + 搜索同步 / 章节虚拟滚动 / 书签跳转）
+    if (!app.isPackaged && mainWindow && process.env['CTEXT_DETAIL_SMOKE'] === '1') {
+      await runDetailSmoke(mainWindow)
       return
     }
 
