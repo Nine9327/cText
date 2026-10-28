@@ -368,6 +368,78 @@ export function getShelf(db: Db, shelfId: string): import('@shared/dto').ShelfDT
   return listShelves(db).find((shelf) => shelf.id === shelfId) ?? null
 }
 
+/**
+ * 单本书的完整信息（`library:get`，M2-04 起被阅读器使用）。
+ *
+ * 与列表查询分开写一条 SQL 的理由：详情需要 `intro / word_count / rel_path` 等
+ * 列表用不上的列，塞进 BOOK_SELECT 会让「万本列表」每行多搬几百字节的简介。
+ *
+ * 返回 null 表示书不存在或已软删除——**离线不算 null**：根目录离线时书还在，
+ * 阅读器要靠 `offline` 字段给出「插上磁盘」而不是「文件没了」的提示。
+ */
+export function getBookDetail(db: Db, id: string): import('@shared/dto').BookDetailDTO | null {
+  const row = db
+    .prepare(
+      `SELECT books.id, books.title, books.author, books.series, books.format,
+              books.favorite, books.read_state, books.progress, books.chapter_count,
+              books.root_id, books.source_type, books.last_read_at,
+              books.created_at, books.updated_at,
+              books.intro, books.publisher, books.pub_date, books.language,
+              books.word_count, books.size_bytes, books.encoding,
+              books.rel_path, books.source_id, books.source_url,
+              library_roots.state AS root_state
+       FROM books LEFT JOIN library_roots ON library_roots.id = books.root_id
+       WHERE books.deleted_at IS NULL AND books.id = ?`
+    )
+    .get(id) as
+    | (BookRow & {
+        intro: string | null
+        publisher: string | null
+        pub_date: string | null
+        language: string | null
+        word_count: number | null
+        size_bytes: number
+        encoding: string | null
+        rel_path: string | null
+        source_id: string | null
+        source_url: string | null
+      })
+    | undefined
+  if (!row) return null
+
+  const categories = db
+    .prepare(
+      `SELECT c.id, c.name, c.color, c.sort
+       FROM book_categories bc JOIN categories c ON c.id = bc.category_id
+       WHERE bc.book_id = ? ORDER BY c.sort, c.name`
+    )
+    .all(id) as { id: string; name: string; color: string | null; sort: number }[]
+
+  const shelves = db
+    .prepare(
+      `SELECT s.id, s.name
+       FROM shelf_books sb JOIN shelves s ON s.id = sb.shelf_id
+       WHERE sb.book_id = ? ORDER BY s.sort, s.name`
+    )
+    .all(id) as { id: string; name: string }[]
+
+  return {
+    ...toBookDTO(row),
+    intro: row.intro,
+    publisher: row.publisher,
+    pubDate: row.pub_date,
+    language: row.language,
+    wordCount: row.word_count,
+    sizeBytes: row.size_bytes,
+    encoding: row.encoding,
+    relPath: row.rel_path,
+    sourceId: row.source_id,
+    sourceUrl: row.source_url,
+    categories,
+    shelves
+  }
+}
+
 export function booksRepo(db: Db = getDb()) {
   return {
     count(): number {

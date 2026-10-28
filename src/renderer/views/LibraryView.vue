@@ -15,7 +15,7 @@
  * 追加。1 万本 = 84 页，预加载提前一屏半，滚动永不触顶等待。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '@/components/common/AppIcon.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import SegmentedControl from '@/components/common/SegmentedControl.vue'
@@ -27,6 +27,22 @@ import { useLibraryStore } from '@/stores/library'
 import type { BookDTO } from '@shared/dto'
 
 const route = useRoute()
+const router = useRouter()
+
+/**
+ * 点开一本书。
+ *
+ * 离线书也照常进阅读器：阅读器里有完整的离线面板（M2-11 会在那里接
+ * 「重新指定目录」），比在列表里拦一个 toast 更有出路。
+ * 网络书还没有正文通路（M3），先给提示而不是跳进一个空白阅读页。
+ */
+function openBook(book: BookDTO): void {
+  if (book.sourceType === 'network') {
+    pushToast({ level: 'info', message: '网络书阅读将在 M3-04 提供' })
+    return
+  }
+  void router.push(`/reader/${book.id}`)
+}
 const library = useLibraryStore()
 const imports = useImportStore()
 
@@ -350,7 +366,13 @@ watch(
               rowGap: `${geometry.rowGap}px`
             }"
           >
-            <BookCard v-for="book in row.books" :key="book.id" :book="book" :variant="viewMode" />
+            <BookCard
+              v-for="book in row.books"
+              :key="book.id"
+              :book="book"
+              :variant="viewMode"
+              @open="openBook(book)"
+            />
           </div>
         </div>
 

@@ -31,6 +31,7 @@ import { runListSmoke } from './ui/list-smoke'
 import { runSearchSmoke } from './ui/search-smoke'
 import { runReaderSmoke } from './reader/smoke'
 import { runReaderBigSmoke } from './reader/big-smoke'
+import { runReaderUiSmoke } from './reader/ui-smoke'
 import { runM1Smoke } from './milestone/m1-smoke'
 import { runImportUiSmoke } from './ui/import-ui-smoke'
 import {
@@ -365,6 +366,12 @@ if (!gotLock) {
     // M1-10 自检：搜索（FTS 前缀命中 / 索引同步 / 200ms 防抖 / 离线标注）
     if (!app.isPackaged && mainWindow && process.env['CTEXT_SEARCH_SMOKE'] === '1') {
       await runSearchSmoke(mainWindow)
+      return
+    }
+
+    // M2-04 自检：分页引擎（真实排版 / 翻页 / 改字号 / 缩放后位置不跳 / 重排耗时）
+    if (!app.isPackaged && mainWindow && process.env['CTEXT_READER_UI_SMOKE'] === '1') {
+      await runReaderUiSmoke(mainWindow, process.env['CTEXT_READER_UI_DIR'] ?? '')
       return
     }
 

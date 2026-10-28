@@ -3,6 +3,7 @@ import LibraryView from '@/views/LibraryView.vue'
 import ShelvesView from '@/views/ShelvesView.vue'
 import SourcesView from '@/views/SourcesView.vue'
 import ComingSoonView from '@/views/ComingSoonView.vue'
+import ReaderView from '@/views/ReaderView.vue'
 
 /**
  * 路由表。五个侧栏入口各有独立去处（对齐产品文档 §2.2）：
@@ -54,16 +55,15 @@ export const router = createRouter({
       meta: { title: '网络小说' }
     },
     {
-      path: '/reader',
+      path: '/reader/:bookId',
       name: 'reader',
-      component: ComingSoonView,
-      meta: {
-        title: '阅读器',
-        desc: '分页 / 滚动、目录、排版主题、进度记忆、书签笔记。',
-        icon: 'book',
-        task: 'M2-01 ~ M2-11'
-      }
+      component: ReaderView,
+      // immersive：阅读时收起侧栏（产品文档 §2.6 的沉浸阅读），标题栏保留
+      // ——无边框窗口没有系统标题栏，关掉它用户就没法拖窗口/最小化
+      meta: { title: '阅读器', immersive: true }
     },
+    // 没有书号时退回书库：阅读器是「打开某本书」的动作，不该有独立入口
+    { path: '/reader', redirect: '/library' },
     {
       path: '/settings',
       name: 'settings',

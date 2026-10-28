@@ -82,6 +82,8 @@ export const ipcSchemas = {
     rootId: idSchema.optional(),
     limit: z.number().int().min(1).max(20).optional()
   }),
+  'library:get': z.object({ id: idSchema }),
+
   'shelves:get': z.object({ shelfId: idSchema }),
   'shelves:list': z.void(),
 

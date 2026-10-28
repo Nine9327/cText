@@ -13,7 +13,7 @@
  */
 import type { BookDTO, Paged, ShelfDTO } from '@shared/dto'
 import { getDb } from '../db/connection'
-import { countBooks, getShelf, listBooks, listShelves, recentBooks } from '../db/repositories/books'
+import { countBooks, getBookDetail, getShelf, listBooks, listShelves, recentBooks } from '../db/repositories/books'
 import { registerHandler } from './registry'
 
 /**
@@ -32,6 +32,10 @@ export interface KeywordCall {
 export const keywordCalls: KeywordCall[] = []
 
 export function registerBooksIpc(): void {
+  // 单本详情：阅读器进门第一件事（书名、章数、离线态）。返回 null 表示书不存在，
+  // 由渲染层渲染「书不见了」而不是把它当错误——用户点开一个被删掉的书不该看到报错弹窗
+  registerHandler('library:get', ({ id }) => getBookDetail(getDb(), id))
+
   registerHandler('books:list', ({ rootId, favoritesOnly, shelfId, keyword, sort, offset, limit }) => {
     if (process.env['CTEXT_SEARCH_SMOKE'] === '1' && keyword) {
       keywordCalls.push({ keyword, at: Date.now() })
