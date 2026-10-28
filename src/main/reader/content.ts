@@ -16,6 +16,7 @@ import type { ChapterContentDTO } from '@shared/dto'
 import { AppError, ERROR_CODES } from '@shared/errors'
 import type { Db } from '../db/connection'
 import { createLogger } from '../log'
+import { readEpubChapter } from './epub'
 import { locateBook } from './paths'
 import { readTxtWindow, textToHtml } from './txt'
 
@@ -91,22 +92,27 @@ async function loadChapter(
   const row = db.prepare(SELECT_CHAPTER).get(bookId, chapterIdx) as ChapterRow | undefined
   if (!row) throw new AppError(ERROR_CODES.notFound, '这一章不存在，目录可能已变化')
 
+  // EPUB 的 anchor 是 zip 内路径，TXT 的是字节偏移——同一条通道两种语义，
+  // 由 format 决定走哪条实现（M1-05 的约定，别试图统一成一种）
+  let truncated = false
+  let html: string
   if (book.format === 'epub') {
-    // EPUB 正文要从 zip 里取 XHTML 并做安全化 + 图片协议，属 M2-03。
-    // 这里明确报「未实现」而不是返回空内容——空内容会被误当成「这一章没字」。
-    throw new AppError(ERROR_CODES.notImplemented, 'EPUB 正文渲染尚未实现')
+    html = (await readEpubChapter(book.absPath, String(row.anchor ?? ''), row.title)).html
+  } else {
+    const window = await readTxtWindow(book.absPath, Number(row.anchor ?? 0), row.length, book.encoding)
+    html = textToHtml(window.text, row.title)
+    truncated = window.hasMore
   }
 
-  const window = await readTxtWindow(book.absPath, Number(row.anchor ?? 0), row.length, book.encoding)
   const content: ChapterContentDTO = {
     bookId: book.id,
     chapterIdx: row.idx,
     title: row.title,
-    html: textToHtml(window.text, row.title),
+    html,
     hasPrev: row.has_prev === 1,
     hasNext: row.has_next === 1,
     // 只有超出窗口的病态章节才带这个标记，正常章节不写（保持 DTO 干净）
-    ...(window.hasMore ? { truncated: true } : {})
+    ...(truncated ? { truncated: true } : {})
   }
   cacheSet(key, content)
 

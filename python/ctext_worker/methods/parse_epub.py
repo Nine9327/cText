@@ -10,8 +10,8 @@
 「只读探测」变成有副作用的操作。EPUB 分支改为回传 `coverHref`（清单里的图片路径），
 真正写盘只在 `cover.extract` 里发生。
 
-**`parse.epub.chapter` 不在本任务范围**：它属于 M2-03（EPUB 渲染），
-要把 XHTML 转成安全 HTML 并抽图片资源，与「能不能导入」是两件事。
+**`parse.epub.chapter` 属 M2-03**：把 XHTML 转成安全 HTML 并抽图片资源，
+净化与资源落盘都在 `render.py`，这里只做参数校验与编排。
 """
 
 from __future__ import annotations
@@ -19,9 +19,10 @@ from __future__ import annotations
 import os
 import tempfile
 
-from epub import MAX_COVER_BYTES, image_ext, open_epub, write_cover
+from epub import MAX_COVER_BYTES, image_ext, open_epub, parse_xml, write_cover
 from paths import require_dir, require_path
-from rpc import method
+from render import MAX_XHTML_BYTES, render_chapter
+from rpc import ERROR_INVALID_ARGUMENT, ERROR_PARSE_FAILED, WorkerError, method
 
 # 没传 destDir 时的落点。生产环境由主进程传 userData/covers，
 # 这里给临时目录只是为了让自检和手工调试不必构造参数
@@ -93,3 +94,30 @@ def cover_extract(params: dict) -> dict:
     result["coverHref"] = href
     result["maxBytes"] = MAX_COVER_BYTES
     return result
+
+
+@method("parse.epub.chapter")
+def parse_epub_chapter(params: dict) -> dict:
+    """读一章正文并净化（M2-03）。
+
+    `href` 是 `chapters.anchor`（zip 内完整路径，M1-05 已归一化），直接 `zip.read`。
+    `destDir` 是图片落盘目录（主进程传 userData/epub-assets）。
+    """
+    path = require_path(params)
+
+    href = params.get("href")
+    if not isinstance(href, str) or not href.strip():
+        raise WorkerError(ERROR_INVALID_ARGUMENT, "缺少 href")
+
+    dest_dir = require_dir(params, "destDir")
+    title = params.get("title")
+    title = title if isinstance(title, str) and title.strip() else None
+
+    with open_epub(path) as book:
+        data = book.read(href.strip(), limit=MAX_XHTML_BYTES)
+        root = parse_xml(data)
+        if root is None:
+            raise WorkerError(ERROR_PARSE_FAILED, "章节内容无法解析", detail=href)
+        html, images, dropped = render_chapter(book, href.strip(), root, dest_dir, title)
+
+    return {"html": html, "images": images, "droppedImages": dropped}

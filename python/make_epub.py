@@ -54,13 +54,16 @@ def tiny_png(width: int = 8, height: int = 8, color: tuple[int, int, int] = (30,
     )
 
 
-def _xhtml(title: str, body: str = "", lang: str = "zh-CN") -> str:
+def _xhtml(title: str, body: str = "", lang: str = "zh-CN", raw: bool = False) -> str:
+    """生成一页 XHTML。`raw=True` 时 `body` 是一段**原样输出**的 HTML
+    （M2-03 要用它造「带图片/脚本/内联样式」的样本，验证净化逻辑）。"""
+    inner = body if raw else f"<p>{escape(body)}</p>"
     return (
         '<?xml version="1.0" encoding="utf-8"?>\n'
         '<!DOCTYPE html>\n'
         f'<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="{lang}" lang="{lang}">\n'
         f"<head><meta charset=\"utf-8\"/><title>{escape(title)}</title></head>\n"
-        f"<body><h1>{escape(title)}</h1><p>{escape(body)}</p></body>\n"
+        f"<body><h1>{escape(title)}</h1>{inner}</body>\n"
         "</html>\n"
     )
 
@@ -150,6 +153,7 @@ def build_epub(
     opf_dir: str = "OEBPS",
     opf_name: str = "content.opf",
     pages: list[tuple[str, str]] | None = None,
+    page_body: dict[str, str] | None = None,
     nav_tree: list[dict] | None = None,
     nav_dir: str | None = None,
     ncx_tree: list[dict] | None = None,
@@ -195,7 +199,11 @@ def build_epub(
         item_id = f"p{index}"
         manifest.append(f'<item id="{item_id}" href="{href}" media-type="application/xhtml+xml"/>')
         spine.append(f'<itemref idref="{item_id}"/>')
-        payload.append((zip_path(href), _xhtml(page_title or f"第{index + 1}节", f"这是{page_title}的正文内容。")))
+        raw = (page_body or {}).get(href)
+        body = raw if raw is not None else f"这是{page_title}的正文内容。"
+        payload.append(
+            (zip_path(href), _xhtml(page_title or f"第{index + 1}节", body, raw=raw is not None))
+        )
 
     if nav_tree:
         nav_href = posixpath.join(nav_dir, "nav.xhtml") if nav_dir else "nav.xhtml"

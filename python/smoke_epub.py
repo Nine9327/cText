@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+import base64
+
 import os
 import shutil
 import sys
@@ -30,7 +32,7 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 from make_epub import build_epub, tiny_png  # noqa: E402
-from methods.parse_epub import cover_extract, parse_epub_toc  # noqa: E402
+from methods.parse_epub import cover_extract, parse_epub_chapter, parse_epub_toc  # noqa: E402
 from methods.parse_txt import parse_detect, parse_meta  # noqa: E402
 from rpc import WorkerError  # noqa: E402
 
@@ -309,6 +311,74 @@ def run_meta(base: str) -> None:
 # ---------------------------------------------------------------- 封面
 
 
+# 1×1 的合法 PNG：用来验证「按魔数判格式 + 按内容哈希命名」
+PNG_1PX = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
+
+def run_chapter(base: str) -> None:
+    """M2-03：章节 XHTML → 安全 HTML + 图片资源落盘。"""
+    body = (
+        '<h2>小节标题</h2>'
+        '<p class="indent" style="color:red" onclick="steal()">带 class 与内联样式的段落。</p>'
+        '<p>正文里的 <a href="2.xhtml">链接</a> 应当脱壳保留文字。</p>'
+        '<div><span>脱壳容器里的文字。</span></div>'
+        '<img src="../Images/pic.png" alt="插图"/>'
+        '<img src="../Images/missing.png"/>'
+        '<img src="https://example.com/x.png"/>'
+        '<script>alert(1)</script><style>p{color:red}</style>'
+        '<iframe src="https://example.com"></iframe>'
+        '<table><tr><td colspan="2">单元格</td></tr></table>'
+        '<p>结尾段落。</p>'
+    )
+    path = sample(
+        base,
+        "body_rich.epub",
+        title="第一章 图文",
+        nav_tree=[{"title": "第一章 图文", "href": "Text/1.xhtml"}],
+        page_body={"Text/1.xhtml": body},
+        extra_files=[("Images/pic.png", PNG_1PX)],
+    )
+    assets = os.path.join(base, "assets")
+    result = parse_epub_chapter(
+        {"path": path, "href": "OEBPS/Text/1.xhtml", "destDir": assets, "title": "第一章 图文"}
+    )
+    html = result["html"]
+
+    check("章节保留段落与文字", "<p>结尾段落。</p>" in html and "带 class" in html, html[:40])
+    check("保留 h2 但去掉与章标题重复的 h1", "<h2>小节标题</h2>" in html and "<h1>" not in html, html[:60])
+    check("脚本/样式/内联框架被剥掉", "<script" not in html and "<style" not in html and "<iframe" not in html, "ok")
+    check("class/style/onclick 属性被剥掉", "class=" not in html and "style=" not in html and "onclick=" not in html, "ok")
+    check("链接与容器脱壳保字（无 a/div/span 标签）", "<a" not in html and "<div" not in html and "<span" not in html, "ok")
+    check("链接文字保留", "链接" in html and "脱壳容器里的文字" in html, "ok")
+    check("表格保留 colspan", '<td colspan="2">' in html, html[html.find("<table") : html.find("<table") + 60])
+
+    check("图片改走自定义协议", 'src="ctext-asset://asset/' in html and ".png" in html, html[html.find("<img") : html.find("<img") + 60])
+    check("图片数量为 1（缺图与外链被丢弃）", result["images"] == 1 and result["droppedImages"] == 2, f"{result['images']}/{result['droppedImages']}")
+
+    written = sorted(os.listdir(assets)) if os.path.isdir(assets) else []
+    check("图片已落盘且按内容哈希命名", len(written) == 1 and len(written[0].split(".")[0]) == 16, str(written))
+    with open(os.path.join(assets, written[0]), "rb") as handle:
+        check("落盘字节与源文件一致", handle.read() == PNG_1PX, "ok")
+
+    again = parse_epub_chapter(
+        {"path": path, "href": "OEBPS/Text/1.xhtml", "destDir": assets, "title": "第一章 图文"}
+    )
+    check("重复解析幂等（不产生第二个文件）", again["html"] == html and len(os.listdir(assets)) == 1, "ok")
+
+    expect_error(
+        "缺少 href 被拒",
+        "E_INVALID_ARGUMENT",
+        lambda: parse_epub_chapter({"path": path, "destDir": assets}),
+    )
+    expect_error(
+        "章节路径不存在报 E_PARSE_FAILED",
+        "E_PARSE_FAILED",
+        lambda: parse_epub_chapter({"path": path, "href": "OEBPS/Text/none.xhtml", "destDir": assets}),
+    )
+
+
 def run_cover(base: str) -> None:
     covers_dir = os.path.join(base, "covers")
     hit = 0
@@ -542,6 +612,7 @@ def main() -> int:
         run_toc(base)
         run_meta(base)
         run_cover(base)
+        run_chapter(base)
         run_errors(base)
         run_perf(base)
         check("样本总数 ≥20", len(samples) >= 20, f"{len(samples)} 个")

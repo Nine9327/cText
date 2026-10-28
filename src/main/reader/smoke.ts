@@ -15,13 +15,14 @@
  *
  * 只在 !app.isPackaged && CTEXT_READER_SMOKE=1 时执行（临时库 + 临时目录）。
  */
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, type BrowserWindow } from 'electron'
 import { AppError } from '@shared/errors'
 import { getDb } from '../db/connection'
 import { coversDir } from '../ipc/import'
 import { getTaskSnapshot, startImport } from '../library/import-task'
+import { assetNameOf, assetsDir } from '../protocol/assets'
 import { clearReaderCache, getChapterContent, readerCacheKeys } from './content'
 
 export interface Check {
@@ -122,8 +123,8 @@ export async function runReaderSmoke(win: BrowserWindow): Promise<Check[]> {
   const phase = await waitForTask(taskId, 120_000)
   const snapshot = getTaskSnapshot(taskId)
   check(
-    '样本导入成功（8 章 TXT + GBK TXT + EPUB）',
-    phase === 'done' && (snapshot?.imported ?? 0) === 3 && (snapshot?.failedTotal ?? -1) === 0,
+    '样本导入成功（UTF-8 TXT + GBK TXT + 2 本 EPUB）',
+    phase === 'done' && (snapshot?.imported ?? 0) === 4 && (snapshot?.failedTotal ?? -1) === 0,
     `${phase} 新增 ${snapshot?.imported} 失败 ${snapshot?.failedTotal}`
   )
 
@@ -135,11 +136,16 @@ export async function runReaderSmoke(win: BrowserWindow): Promise<Check[]> {
   const utf8 = findBook('utf8.txt')
   const gbk = findBook('gbk.txt')
   const epub = findBook('toc_volume.epub')
-  if (!utf8 || !gbk || !epub) {
-    check('三本书都已入库', false, `utf8=${!!utf8} gbk=${!!gbk} epub=${!!epub}`)
+  const rich = findBook('body_rich.epub')
+  if (!utf8 || !gbk || !epub || !rich) {
+    check('四本书都已入库', false, `utf8=${!!utf8} gbk=${!!gbk} epub=${!!epub} rich=${!!rich}`)
     return checks
   }
-  check('三本书都已入库', true, `utf8=${utf8.chapters}章 gbk=${gbk.chapters}章 epub=${epub.chapters}章`)
+  check(
+    '四本书都已入库',
+    true,
+    `utf8=${utf8.chapters}章 gbk=${gbk.chapters}章 epub=${epub.chapters}章 rich=${rich.chapters}章`
+  )
   check(
     'TXT 章数与样本一致（正文行没有被误判成标题）',
     utf8.chapters === CHAPTERS && gbk.chapters === 3,
@@ -229,14 +235,59 @@ export async function runReaderSmoke(win: BrowserWindow): Promise<Check[]> {
   const noChapter = await expectCode(() => getChapterContent(db, utf8.id, 999), 'E_NOT_FOUND')
   check('章节不存在 → E_NOT_FOUND', noChapter === '', noChapter || 'E_NOT_FOUND')
 
+  // ------------------------------------------------------------ EPUB 渲染（M2-03）
   clearReaderCache()
-  const epubError = await expectCode(() => getChapterContent(db, epub.id, 0), 'E_NOT_IMPLEMENTED')
-  check('EPUB 正文 → E_NOT_IMPLEMENTED（属 M2-03）', epubError === '', epubError || 'E_NOT_IMPLEMENTED')
+  const plainEpub = await getChapterContent(db, epub.id, 0)
+  check('EPUB 章节读出 HTML', plainEpub.html.includes('<p>'), plainEpub.html.slice(0, 40))
+
+  clearReaderCache()
+  const richChapter = await getChapterContent(db, rich.id, 0)
+  check('EPUB 图文混排：段落与文字齐全', richChapter.html.includes('结尾段落'), richChapter.html.slice(0, 40))
+  check(
+    '脚本/内联样式/iframe 被剥掉',
+    !richChapter.html.includes('<script') &&
+      !richChapter.html.includes('<style') &&
+      !richChapter.html.includes('<iframe'),
+    'ok'
+  )
+  check(
+    'class/style/onclick 属性被剥掉（样式隔离）',
+    !richChapter.html.includes('class=') && !richChapter.html.includes('style='),
+    'ok'
+  )
+  check('章节标题不与正文重复', !richChapter.html.includes('<h1>'), richChapter.html.slice(0, 40))
+
+  const assetMatch = /src="(ctext-asset:\/\/asset\/[^"]+)"/.exec(richChapter.html)
+  check('图片改走自定义协议', !!assetMatch, assetMatch?.[1] ?? richChapter.html.slice(0, 80))
+
+  const assetName = assetMatch ? assetNameOf(assetMatch[1]) : null
+  const assetFile = assetName ? join(assetsDir(), assetName) : ''
+  const assetBytes = assetFile && existsSync(assetFile) ? readFileSync(assetFile).length : 0
+  check('图片资源已落盘', assetBytes > 0, `${assetFile || '无'} (${assetBytes}B)`)
+
+  check(
+    '协议拒绝目录穿越与非法文件名',
+    assetNameOf('ctext-asset://asset/../../ctext.db') === null &&
+      assetNameOf('ctext-asset://asset/..%2F..%2Fctext.db') === null &&
+      assetNameOf('ctext-asset://other/0123456789abcdef.png') === null &&
+      assetNameOf('ctext-asset://asset/notahash.png') === null,
+    '全部拒绝'
+  )
 
   // ------------------------------------------------------------ 渲染层走 IPC
   const script = String.raw`
     (async () => {
-      const out = { timings: [], htmlLen: 0, title: '', badCode: '' }
+      const out = { timings: [], htmlLen: 0, title: '', badCode: '', asset: '', missing: '' }
+      // 图片协议：真加载一张（1×1 PNG），再试一个格式合法但不存在的名字
+      const load = (url) => new Promise((resolve) => {
+        const img = new Image()
+        const timer = setTimeout(() => resolve('timeout'), 4000)
+        img.onload = () => { clearTimeout(timer); resolve('ok:' + img.naturalWidth) }
+        img.onerror = () => { clearTimeout(timer); resolve('error') }
+        img.src = url
+      })
+      out.asset = await load('${assetMatch ? assetMatch[1] : ''}')
+      out.missing = await load('ctext-asset://asset/0000000000000000.png')
       for (let i = 0; i < 10; i += 1) {
         const t0 = performance.now()
         const r = await window.api.invoke('reader:content', { bookId: '${utf8.id}', chapterIdx: i % 2 })
@@ -259,10 +310,20 @@ export async function runReaderSmoke(win: BrowserWindow): Promise<Check[]> {
     check('渲染层 IPC 调用', false, err instanceof Error ? err.message : String(err))
     return checks
   }
-  const out = JSON.parse(raw) as { error?: string; p95?: number; htmlLen?: number; title?: string; badCode?: string }
+  const out = JSON.parse(raw) as {
+    error?: string
+    p95?: number
+    htmlLen?: number
+    title?: string
+    badCode?: string
+    asset?: string
+    missing?: string
+  }
   check('渲染层能通过 IPC 拿到正文', !out.error && (out.htmlLen ?? 0) > 0, out.error ?? `${out.htmlLen} 字符 / ${out.title}`)
   check('IPC 章节切换 P95 < 100ms', (out.p95 ?? 999) < 100, `p95=${out.p95}ms`)
   check('渲染层收到的错误码未经降级', out.badCode === 'E_NOT_FOUND', out.badCode || '空')
+  check('图片能通过自定义协议加载（1×1 PNG）', out.asset === 'ok:1', out.asset ?? '空')
+  check('不存在的资源名返回失败而不是空白图片', out.missing === 'error', out.missing ?? '空')
 
   for (const item of checks) {
     console.log(`SMOKE READER ${item.ok ? 'PASS' : 'FAIL'} ${item.name}${item.detail ? ` (${item.detail})` : ''}`)

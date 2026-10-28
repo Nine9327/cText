@@ -13,6 +13,7 @@ import { runIpcSmoke } from './ipc/smoke'
 import { registerRootsIpc } from './ipc/roots'
 import { registerBooksIpc } from './ipc/books'
 import { registerReaderIpc } from './ipc/reader'
+import { installAssetProtocol, registerAssetScheme } from './protocol/assets'
 import { registerImportIpc } from './ipc/import'
 import { registerSystemIpc } from './ipc/system'
 import { attachWindowStateEvents, registerWindowIpc } from './ipc/window'
@@ -84,6 +85,10 @@ if (process.env['CTEXT_DISABLE_GPU'] === '1') {
   app.disableHardwareAcceleration()
 }
 
+// 自定义协议必须在 app ready 之前登记特权（标准/安全/可 fetch），
+// 之后再调用会被 Electron 忽略，表现为图片一律加载失败。
+registerAssetScheme()
+
 /** 最小窗口尺寸（产品文档 §2.2 布局规则） */
 const MIN_WIDTH = 1024
 const MIN_HEIGHT = 680
@@ -99,7 +104,7 @@ function applyCsp() {
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'none'"
+          "default-src 'self'; img-src 'self' data: ctext-asset:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'none'"
         ]
       }
     })
@@ -272,6 +277,7 @@ if (!gotLock) {
     registerBooksIpc()
     registerImportIpc()
     registerReaderIpc()
+    installAssetProtocol()
     installIpc()
 
     // M0-03：数据库在窗口创建之前初始化，失败则不进入界面

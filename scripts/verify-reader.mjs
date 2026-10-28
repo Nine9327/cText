@@ -95,14 +95,17 @@ function emitEpub(sampleDir, emitDir) {
     encoding: 'utf8',
     env: { ...cleanEnv, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' }
   })
-  const source = join(emitDir, 'toc_volume.epub')
-  if (!existsSync(source)) {
+  const wanted = ['toc_volume.epub', 'body_rich.epub']
+  const missing = wanted.filter((name) => !existsSync(join(emitDir, name)))
+  if (missing.length > 0) {
     console.error(r.stdout ?? '')
     console.error(r.stderr ?? '')
-    throw new Error('EPUB 样本未生成')
+    throw new Error(`EPUB 样本未生成：${missing.join(', ')}`)
   }
-  copyFileSync(source, join(sampleDir, 'toc_volume.epub'))
-  record('样本就位：toc_volume.epub', true, join(sampleDir, 'toc_volume.epub'))
+  for (const name of wanted) {
+    copyFileSync(join(emitDir, name), join(sampleDir, name))
+    record(`样本就位：${name}`, true, join(sampleDir, name))
+  }
 }
 
 function runReaderSmoke(scratch, sampleDir) {
