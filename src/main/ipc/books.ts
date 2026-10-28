@@ -23,6 +23,9 @@ import {
   updateBookMeta
 } from '../db/repositories/books'
 import { relocateBookFile } from '../library/relocate'
+import { locateBook } from '../reader/paths'
+import { removeBooks, restoreBooks, setFavoriteMany } from '../db/repositories/books'
+import { unlink } from 'node:fs/promises'
 import { registerHandler } from './registry'
 
 /**
@@ -90,6 +93,28 @@ export function registerBooksIpc(): void {
     }
     return getBookDetail(getDb(), id)
   })
+
+  /**
+   * 从书库移除（M3-05）。**默认只软删除库记录**；`deleteFile` 只有显式传 true
+   * 才会动磁盘，而界面永远传 false——「自动流程删用户文件」是明令禁止的，
+   * 而「移出书库」在用户心里是「不再出现在列表里」，不是「删掉我的文件」。
+   */
+  registerHandler('library:remove', async ({ id, deleteFile }) => {
+    let absPath: string | null = null
+    if (deleteFile) {
+      absPath = (await locateBook(getDb(), id).catch(() => null))?.absPath ?? null
+    }
+    if (removeBooks(getDb(), [id]) === 0) {
+      throw new AppError(ERROR_CODES.notFound, '这本书已不在书库中')
+    }
+    if (absPath) await unlink(absPath).catch(() => undefined)
+  })
+
+  registerHandler('library:removeMany', ({ bookIds }) => ({ removed: removeBooks(getDb(), bookIds) }))
+  registerHandler('library:restoreMany', ({ bookIds }) => ({ restored: restoreBooks(getDb(), bookIds) }))
+  registerHandler('library:setFavoriteMany', ({ bookIds, value }) => ({
+    updated: setFavoriteMany(getDb(), bookIds, value)
+  }))
 
   // 书架相关通道在 ipc/shelves.ts（M3-02）
 }

@@ -377,6 +377,40 @@ export function countBooks(
  * 那边有 CRUD、架内排序与「删书架不删书」的约束，放在这里会和「书」的查询逻辑搅在一起。
  */
 
+/** 批量收藏（M3-05）。一条 UPDATE，500 本也只有一次往返 */
+export function setFavoriteMany(db: Db, bookIds: string[], value: boolean): number {
+  if (bookIds.length === 0) return 0
+  const slots = bookIds.map(() => '?').join(',')
+  return db
+    .prepare(`UPDATE books SET favorite = ? WHERE deleted_at IS NULL AND id IN (${slots})`)
+    .run(value ? 1 : 0, ...bookIds).changes
+}
+
+/**
+ * 从书库移除（M3-05 右键菜单）。**只软删除库记录，不动磁盘文件**。
+ *
+ * `deleteFile` 参数保留但默认 false，且界面永远传 false：自动流程删用户文件
+ * 是产品文档里明令禁止的（§2.5「删除类操作只删库记录」）。真要删文件，
+ * 由用户自己在资源管理器里做——那件事没有撤销。
+ */
+export function removeBooks(db: Db, bookIds: string[]): number {
+  if (bookIds.length === 0) return 0
+  const now = Date.now()
+  const slots = bookIds.map(() => '?').join(',')
+  return db
+    .prepare(`UPDATE books SET deleted_at = ? WHERE deleted_at IS NULL AND id IN (${slots})`)
+    .run(now, ...bookIds).changes
+}
+
+/** 撤销「移出书库」：把 deleted_at 置空。软删除本来就该是可逆的 */
+export function restoreBooks(db: Db, bookIds: string[]): number {
+  if (bookIds.length === 0) return 0
+  const slots = bookIds.map(() => '?').join(',')
+  return db
+    .prepare(`UPDATE books SET deleted_at = NULL WHERE deleted_at IS NOT NULL AND id IN (${slots})`)
+    .run(...bookIds).changes
+}
+
 /**
  * 元信息编辑（M3-04）。
  *

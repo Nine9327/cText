@@ -13,7 +13,7 @@ import type { ShelfDTO } from '@shared/dto'
 import { AppError, ERROR_CODES } from '@shared/errors'
 import { getDb } from '../db/connection'
 import {
-  addBooksToShelf,
+  addBooksToShelfDetailed,
   createShelf,
   getShelf,
   listShelves,
@@ -52,7 +52,8 @@ export function registerShelvesIpc(): void {
 
   registerHandler('shelves:addBooks', ({ shelfId, bookIds }) => {
     if (!getShelf(getDb(), shelfId)) throw new AppError(ERROR_CODES.notFound, '书架不存在，可能已被删除')
-    return { added: addBooksToShelf(getDb(), shelfId, bookIds, Date.now()) }
+    // 回传真正新增的 bookIds：撤销时要按它来，按入参会把原本在架上的书也移出去
+    return addBooksToShelfDetailed(getDb(), shelfId, bookIds, Date.now())
   })
 
   registerHandler('shelves:removeBooks', ({ shelfId, bookIds }) => ({

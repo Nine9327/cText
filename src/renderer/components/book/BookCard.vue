@@ -28,8 +28,10 @@ const props = withDefaults(
     draggable?: boolean
     /** 显示「移出书架」（只在书架页） */
     removable?: boolean
+    /** 批量选择模式下被选中（M3-05）：只加一圈描边，不做缩放/位移，避免布局抖动 */
+    selected?: boolean
   }>(),
-  { variant: 'grid', draggable: false, removable: false }
+  { variant: 'grid', draggable: false, removable: false, selected: false }
 )
 
 /**
@@ -85,8 +87,10 @@ function onDragStart(event: DragEvent): void {
 
 <template>
   <div
-    class="group relative"
+    class="group relative rounded-md"
+    :class="selected && 'ring-2 ring-accent/70 ring-offset-1 ring-offset-app'"
     :data-fav-on="book.favorite ? '1' : '0'"
+    :data-selected="selected ? '1' : '0'"
     :draggable="draggable"
     @dragstart="onDragStart"
   >

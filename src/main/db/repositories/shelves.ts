@@ -82,7 +82,23 @@ export function removeShelf(db: Db, shelfId: string): boolean {
  * 新书一律追加到末尾，顺序沿用用户在书架页看到的排列。
  */
 export function addBooksToShelf(db: Db, shelfId: string, bookIds: string[], now: number): number {
+  return addBooksToShelfDetailed(db, shelfId, bookIds, now).added
+}
+
+/**
+ * 与 `addBooksToShelf` 同实现，但**回传真正新增的 bookIds**。
+ *
+ * 撤销「批量加入书架」必须知道哪些是这次加进去的：原本就在架上的书不能跟着被移出。
+ * 计数（`added`）只能回答「加了几本」，回答不了「加的是哪几本」。
+ */
+export function addBooksToShelfDetailed(
+  db: Db,
+  shelfId: string,
+  bookIds: string[],
+  now: number
+): { added: number; bookIds: string[] } {
   let added = 0
+  const touched: string[] = []
   const max = db.prepare('SELECT COALESCE(MAX(sort), -1) AS m FROM shelf_books WHERE shelf_id = ?').get(shelfId) as {
     m: number
   }
@@ -90,11 +106,15 @@ export function addBooksToShelf(db: Db, shelfId: string, bookIds: string[], now:
   const insert = db.prepare('INSERT OR IGNORE INTO shelf_books (shelf_id, book_id, sort, added_at) VALUES (?, ?, ?, ?)')
   db.transaction(() => {
     for (const bookId of bookIds) {
-      added += insert.run(shelfId, bookId, next, now).changes
+      const changes = insert.run(shelfId, bookId, next, now).changes
+      if (changes > 0) {
+        added += changes
+        touched.push(bookId)
+      }
       next += 1
     }
   })()
-  return added
+  return { added, bookIds: touched }
 }
 
 export function removeBooksFromShelf(db: Db, shelfId: string, bookIds: string[]): number {

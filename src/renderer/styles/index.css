@@ -136,6 +136,11 @@
     @apply flex h-6 w-6 items-center justify-center rounded-md bg-black/45 text-white/75 backdrop-blur-[2px] transition-all duration-120 hover:text-amber-300;
   }
 
+  /** 右键菜单项（M3-05）：左图标 + 右箭头，行高固定以便扫读 */
+  .ct-menu-item {
+    @apply flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] text-ink/90 transition-colors duration-120 hover:bg-hover;
+  }
+
   .ct-fav-on {
     @apply text-amber-400 hover:text-amber-300;
   }

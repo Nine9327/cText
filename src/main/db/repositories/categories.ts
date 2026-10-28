@@ -100,6 +100,49 @@ export function setBookCategories(db: Db, bookId: string, categoryIds: string[])
   return written
 }
 
+/**
+ * 批量打标签 / 批量取消（M3-05）。
+ *
+ * 与单本的 `setBookCategories` 语义不同：这里是**增量**（只加不删、只删不加），
+ * 因为批量场景的意图是「给这 500 本都加上「科幻」」，而不是「把它们原有的
+ * 标签全换成科幻」。整体替换在批量里会静默清掉用户手工整理过的标签。
+ */
+export function addBookCategories(
+  db: Db,
+  bookIds: string[],
+  categoryIds: string[]
+): { updated: number; bookIds: string[] } {
+  if (bookIds.length === 0 || categoryIds.length === 0) return { updated: 0, bookIds: [] }
+  let updated = 0
+  const touched = new Set<string>()
+  db.transaction(() => {
+    const insert = db.prepare('INSERT OR IGNORE INTO book_categories (book_id, category_id) VALUES (?, ?)')
+    for (const bookId of bookIds) {
+      for (const categoryId of categoryIds) {
+        const changes = insert.run(bookId, categoryId).changes
+        if (changes > 0) {
+          updated += changes
+          // 只把这批里**真的新增了标签**的书纳入撤销范围
+          touched.add(bookId)
+        }
+      }
+    }
+  })()
+  return { updated, bookIds: [...touched] }
+}
+
+export function removeBookCategories(db: Db, bookIds: string[], categoryIds: string[]): number {
+  if (bookIds.length === 0 || categoryIds.length === 0) return 0
+  let removed = 0
+  db.transaction(() => {
+    const del = db.prepare('DELETE FROM book_categories WHERE book_id = ? AND category_id = ?')
+    for (const bookId of bookIds) {
+      for (const categoryId of categoryIds) removed += del.run(bookId, categoryId).changes
+    }
+  })()
+  return removed
+}
+
 export function categoriesOfBook(db: Db, bookId: string): CategoryDTO[] {
   const rows = db
     .prepare(`${CATEGORY_SELECT} WHERE categories.id IN (SELECT category_id FROM book_categories WHERE book_id = ?)

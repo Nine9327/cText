@@ -37,6 +37,7 @@ import { runFavoriteSmoke } from './ui/favorite-smoke'
 import { runShelfSmoke } from './ui/shelf-smoke'
 import { runCategorySmoke } from './ui/category-smoke'
 import { runDetailSmoke } from './ui/detail-smoke'
+import { runBatchSmoke } from './ui/batch-smoke'
 import { runReaderSmoke } from './reader/smoke'
 import { runReaderBigSmoke } from './reader/big-smoke'
 import { runReaderUiSmoke } from './reader/ui-smoke'
@@ -405,6 +406,12 @@ if (!gotLock) {
     // M3-04 自检：书籍详情（元信息编辑 + 搜索同步 / 章节虚拟滚动 / 书签跳转）
     if (!app.isPackaged && mainWindow && process.env['CTEXT_DETAIL_SMOKE'] === '1') {
       await runDetailSmoke(mainWindow)
+      return
+    }
+
+    // M3-05 自检：批量与右键菜单（500 本批量 <2s / 七项菜单 / 撤销）
+    if (!app.isPackaged && mainWindow && process.env['CTEXT_BATCH_SMOKE'] === '1') {
+      await runBatchSmoke(mainWindow)
       return
     }
 

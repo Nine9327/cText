@@ -72,7 +72,20 @@ export type IpcMap = {
     }
     output: BookDetailDTO | null
   }
+  /** 从书库移除（M3-05）：软删除库记录。`deleteFile` 恒为 false（界面不提供删文件） */
   'library:remove': { input: { id: string; deleteFile: boolean }; output: void }
+  /** 批量收藏（M3-05）：一条 UPDATE，传目标值保证幂等 */
+  'library:setFavoriteMany': { input: { bookIds: string[]; value: boolean }; output: { updated: number } }
+  /** 批量打标签（增量，不覆盖既有标签）/ 批量取消 */
+  'library:addCategories': {
+    input: { bookIds: string[]; categoryIds: string[] }
+    output: { updated: number; bookIds: string[] }
+  }
+  'library:removeCategories': { input: { bookIds: string[]; categoryIds: string[] }; output: { updated: number } }
+  /** 批量移除出书库（软删除） */
+  'library:removeMany': { input: { bookIds: string[] }; output: { removed: number } }
+  /** 撤销「移出书库」（M3-05）：软删除是可逆的，恢复只需把 deleted_at 置空 */
+  'library:restoreMany': { input: { bookIds: string[] }; output: { restored: number } }
 
   // 根目录
   'roots:list': { input: void; output: RootDTO[] }
@@ -89,7 +102,11 @@ export type IpcMap = {
   'shelves:create': { input: { name: string }; output: ShelfDTO }
   'shelves:rename': { input: { shelfId: string; name: string }; output: ShelfDTO | null }
   'shelves:remove': { input: { shelfId: string }; output: void }
-  'shelves:addBooks': { input: { shelfId: string; bookIds: string[] }; output: { added: number } }
+  /** `bookIds` 回传**真正新增**的那些书（撤销要按它来，不能按入参） */
+  'shelves:addBooks': {
+    input: { shelfId: string; bookIds: string[] }
+    output: { added: number; bookIds: string[] }
+  }
   'shelves:removeBooks': { input: { shelfId: string; bookIds: string[] }; output: { removed: number } }
   /** 架内排序：把一本书移到第 `toIndex` 位（0 基），服务端负责整体重排 */
   'shelves:moveBook': { input: { shelfId: string; bookId: string; toIndex: number }; output: void }

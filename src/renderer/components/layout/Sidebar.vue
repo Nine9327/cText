@@ -56,7 +56,7 @@ async function onShelfDrop(event: DragEvent, shelfId: string): Promise<void> {
   try {
     if (bookId) {
       const shelf = library.shelves.find((item) => item.id === shelfId)
-      const added = await library.addToShelf(shelfId, [bookId])
+      const { added } = await library.addToShelf(shelfId, [bookId])
       pushToast(
         added > 0
           ? { level: 'info', message: `已加入书架「${shelf?.name ?? ''}」` }

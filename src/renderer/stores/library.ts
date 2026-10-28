@@ -163,11 +163,14 @@ export const useLibraryStore = defineStore('library', () => {
     await loadShelves()
   }
 
-  /** 加入书架。返回真正新增的条数（已在架上的书不算） */
-  async function addToShelf(shelfId: string, bookIds: string[]): Promise<number> {
-    const { added } = await call('shelves:addBooks', { shelfId, bookIds })
-    if (added > 0) await afterShelfWrite(shelfId)
-    return added
+  /**
+   * 加入书架。返回**真正新增的条数与 id 列表**——撤销要按 id 来，
+   * 按入参撤销会把原本就在架上的书也移出去（那是一次静默的数据丢失）。
+   */
+  async function addToShelf(shelfId: string, bookIds: string[]): Promise<{ added: number; bookIds: string[] }> {
+    const result = await call('shelves:addBooks', { shelfId, bookIds })
+    if (result.added > 0) await afterShelfWrite(shelfId)
+    return result
   }
 
   async function removeFromShelf(shelfId: string, bookIds: string[]): Promise<number> {
@@ -180,6 +183,54 @@ export const useLibraryStore = defineStore('library', () => {
   async function moveBookInShelf(shelfId: string, bookId: string, toIndex: number): Promise<void> {
     await call('shelves:moveBook', { shelfId, bookId, toIndex })
     if (domain.value.shelfId === shelfId) await loadPage(0)
+  }
+
+  // ---------------------------------------------------------------- 批量（M3-05）
+
+  /**
+   * 批量收藏。**一次 IPC 一条 UPDATE**，不逐本调用：
+   * 500 本逐本发请求要 500 次往返，光 IPC 就超过验收要求的 2 秒。
+   */
+  async function setFavoriteMany(bookIds: string[], value: boolean): Promise<number> {
+    const { updated } = await call('library:setFavoriteMany', { bookIds: [...bookIds], value })
+    await Promise.all([loadPage(0), loadFavCount()])
+    return updated
+  }
+
+  /** 批量打标签（增量）/ 取消标签。撤销就靠这两个互为逆操作 */
+  async function addCategories(
+    bookIds: string[],
+    categoryIds: string[]
+  ): Promise<{ updated: number; bookIds: string[] }> {
+    const result = await call('library:addCategories', {
+      bookIds: [...bookIds],
+      categoryIds: [...categoryIds]
+    })
+    await loadCategories()
+    return result
+  }
+
+  async function removeCategories(bookIds: string[], categoryIds: string[]): Promise<number> {
+    const { updated } = await call('library:removeCategories', {
+      bookIds: [...bookIds],
+      categoryIds: [...categoryIds]
+    })
+    await loadCategories()
+    return updated
+  }
+
+  /** 批量移出书库（软删除）。文件不动 */
+  async function removeMany(bookIds: string[]): Promise<number> {
+    const { removed } = await call('library:removeMany', { bookIds: [...bookIds] })
+    await Promise.all([loadPage(0), loadFavCount(), loadShelves()])
+    return removed
+  }
+
+  /** 撤销「移出书库」 */
+  async function restoreMany(bookIds: string[]): Promise<number> {
+    const { restored } = await call('library:restoreMany', { bookIds: [...bookIds] })
+    await Promise.all([loadPage(0), loadFavCount(), loadShelves()])
+    return restored
   }
 
   /** 侧栏书架拖动排序 */
@@ -412,6 +463,11 @@ export const useLibraryStore = defineStore('library', () => {
     removeFromShelf,
     moveBookInShelf,
     reorderShelves,
+    setFavoriteMany,
+    addCategories,
+    removeCategories,
+    removeMany,
+    restoreMany,
     loadCategories,
     setCategoryFilter,
     createCategory,

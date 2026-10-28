@@ -15,9 +15,11 @@ import type { CategoryDTO } from '@shared/dto'
 import { AppError, ERROR_CODES } from '@shared/errors'
 import { getDb } from '../db/connection'
 import {
+  addBookCategories,
   createCategory,
   findCategoryByName,
   listCategories,
+  removeBookCategories,
   removeCategory,
   setBookCategories,
   updateCategory
@@ -55,4 +57,16 @@ export function registerCategoriesIpc(): void {
   registerHandler('library:setCategories', ({ id, categoryIds }) => {
     setBookCategories(getDb(), id, categoryIds)
   })
+
+  /**
+   * 批量打标签（M3-05）：**增量**，不覆盖既有标签。
+   * 批量场景的意图是「给这 500 本都加上科幻」，而不是「把它们的标签全换成科幻」。
+   * `removeCategories` 是它的逆操作，也是「撤销」的实现基础。
+   */
+  registerHandler('library:addCategories', ({ bookIds, categoryIds }) =>
+    addBookCategories(getDb(), bookIds, categoryIds)
+  )
+  registerHandler('library:removeCategories', ({ bookIds, categoryIds }) => ({
+    updated: removeBookCategories(getDb(), bookIds, categoryIds)
+  }))
 }

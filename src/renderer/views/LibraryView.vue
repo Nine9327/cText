@@ -22,6 +22,8 @@ import SegmentedControl from '@/components/common/SegmentedControl.vue'
 import SortMenu from '@/components/library/SortMenu.vue'
 import CategoryFilter from '@/components/library/CategoryFilter.vue'
 import CategoryManager from '@/components/library/CategoryManager.vue'
+import BookContextMenu from '@/components/book/BookContextMenu.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import BookCard from '@/components/book/BookCard.vue'
 import { pushToast } from '@/lib/toast'
 import { BOOK_MIME, getDragSource } from '@/lib/drag'
@@ -106,6 +108,209 @@ async function onCardDrop(event: DragEvent, toIndex: number, target: BookDTO): P
 const viewMode = ref<'grid' | 'detail' | 'list'>('grid')
 /** 分类管理弹窗（M3-03）。筛选与 CRUD 分两个控件：一个管「看哪些」，一个管「有哪些」 */
 const managingCategories = ref(false)
+
+// ---------------------------------------------------------------- 批量与右键菜单（M3-05）
+
+/**
+ * 选择模式：卡片点击从「打开这本书」变成「选中」。**不做常驻多选**——
+ * 常态下卡片点击是阅读（M1 起的手势，也是用户对阅读器最自然的预期），
+ * 让 Ctrl+点击才能选中会把多选藏成一个没人发现的技巧。
+ */
+const selectionMode = ref(false)
+const selected = ref<string[]>([])
+
+const menu = ref<{ open: boolean; x: number; y: number; book: BookDTO | null }>({
+  open: false,
+  x: 0,
+  y: 0,
+  book: null
+})
+
+/** 批量操作的二级下拉（加入哪个书架 / 打哪个标签） */
+const picker = ref<'shelf' | 'category' | null>(null)
+/** 待确认「移出书库」的书 */
+const removing = ref<BookDTO[]>([])
+
+/**
+ * 撤销栈（只留最近一次）。
+ *
+ * 只留一条是刻意的：批量操作是「一步大动作」，用户想撤的几乎总是刚做的那一下。
+ * 留十条会让人在「撤销」上做考古，还会让界面出现一个没人维护的历史面板。
+ */
+const undo = ref<{ label: string; run: () => Promise<void> } | null>(null)
+
+const selectedBooks = computed(() => library.books.filter((item) => selected.value.includes(item.id)))
+
+function toggleSelectionMode(): void {
+  selectionMode.value = !selectionMode.value
+  selected.value = []
+  picker.value = null
+}
+
+function toggleSelect(book: BookDTO): void {
+  const index = selected.value.indexOf(book.id)
+  if (index >= 0) selected.value.splice(index, 1)
+  else selected.value.push(book.id)
+}
+
+function selectAll(): void {
+  selected.value = library.books.map((item) => item.id)
+}
+
+function onCardOpen(book: BookDTO): void {
+  if (selectionMode.value) toggleSelect(book)
+  else openBook(book)
+}
+
+function openMenu(event: MouseEvent, book: BookDTO): void {
+  if (selectionMode.value) return
+  menu.value = { open: true, x: event.clientX, y: event.clientY, book }
+}
+
+function closeMenu(): void {
+  menu.value = { ...menu.value, open: false }
+}
+
+const menuBook = computed(() => menu.value.book)
+
+/** 收藏 / 取消收藏（批量走一条 IPC，单选走既有通道） */
+async function favoriteMany(value: boolean, books: BookDTO[]): Promise<void> {
+  const changed = books.filter((item) => item.favorite !== value).map((item) => item.id)
+  if (changed.length === 0) {
+    pushToast({ level: 'info', message: value ? '这些书都已经收藏了' : '这些书都还没收藏' })
+    return
+  }
+  try {
+    const updated = await library.setFavoriteMany(changed, value)
+    // 撤销要按「这次真正改动的那些」来，否则会把原本就是这个状态的书也翻回去
+    undo.value = {
+      label: `${value ? '收藏' : '取消收藏'} ${updated} 本`,
+      run: async () => {
+        await library.setFavoriteMany(changed, !value)
+      }
+    }
+    pushToast({ level: 'info', message: `已${value ? '收藏' : '取消收藏'} ${updated} 本` })
+  } catch (err) {
+    pushToast({ level: 'error', message: err instanceof Error ? err.message : '批量收藏失败' })
+  }
+}
+
+async function addToShelfMany(shelfId: string, books: BookDTO[]): Promise<void> {
+  const shelf = library.shelves.find((item) => item.id === shelfId)
+  picker.value = null
+  try {
+    const result = await library.addToShelf(
+      shelfId,
+      books.map((item) => item.id)
+    )
+    if (result.added === 0) {
+      pushToast({ level: 'info', message: `这些书已经在「${shelf?.name ?? ''}」里了` })
+      return
+    }
+    undo.value = {
+      label: `加入书架 ${result.added} 本`,
+      // 只撤销真正加进去的那些：原本在架上的书不能跟着被移出
+      run: async () => {
+        await library.removeFromShelf(shelfId, result.bookIds)
+      }
+    }
+    pushToast({ level: 'info', message: `已加入「${shelf?.name ?? ''}」${result.added} 本` })
+  } catch (err) {
+    pushToast({ level: 'error', message: err instanceof Error ? err.message : '加入书架失败' })
+  }
+}
+
+async function addCategoryMany(categoryId: string, books: BookDTO[]): Promise<void> {
+  const category = library.categories.find((item) => item.id === categoryId)
+  picker.value = null
+  try {
+    const result = await library.addCategories(
+      books.map((item) => item.id),
+      [categoryId]
+    )
+    if (result.updated === 0) {
+      pushToast({ level: 'info', message: `这些书都已经有「${category?.name ?? ''}」标签了` })
+      return
+    }
+    undo.value = {
+      label: `打上分类 ${result.bookIds.length} 本`,
+      run: async () => {
+        await library.removeCategories(result.bookIds, [categoryId])
+      }
+    }
+    pushToast({ level: 'info', message: `已给 ${result.bookIds.length} 本打上「${category?.name ?? ''}」` })
+  } catch (err) {
+    pushToast({ level: 'error', message: err instanceof Error ? err.message : '批量打标签失败' })
+  }
+}
+
+async function confirmRemove(): Promise<void> {
+  const books = removing.value
+  removing.value = []
+  if (books.length === 0) return
+  const ids = books.map((item) => item.id)
+  try {
+    const removed = await library.removeMany(ids)
+    undo.value = {
+      label: `移出书库 ${removed} 本`,
+      // 软删除是可逆的：恢复只是把 deleted_at 置空，文件从头到尾没被动过
+      run: async () => {
+        await library.restoreMany(ids)
+      }
+    }
+    selected.value = selected.value.filter((id) => !ids.includes(id))
+    pushToast({ level: 'info', message: `已从书库移除 ${removed} 本，文件仍保留在原目录` })
+  } catch (err) {
+    pushToast({ level: 'error', message: err instanceof Error ? err.message : '移除失败' })
+  }
+}
+
+async function undoLast(): Promise<void> {
+  const action = undo.value
+  undo.value = null
+  if (!action) return
+  try {
+    await action.run()
+    pushToast({ level: 'info', message: `已撤销：${action.label}` })
+  } catch (err) {
+    pushToast({ level: 'error', message: err instanceof Error ? err.message : '撤销失败' })
+  }
+}
+
+/** 右键菜单的单本动作复用同一批实现，只是把「一批」缩成「一本」 */
+async function menuFavorite(): Promise<void> {
+  const book = menuBook.value
+  closeMenu()
+  if (book) await toggleFavorite(book)
+}
+
+async function menuAddShelf(shelfId: string): Promise<void> {
+  const book = menuBook.value
+  closeMenu()
+  if (book) await addToShelfMany(shelfId, [book])
+}
+
+async function menuAddCategory(categoryId: string): Promise<void> {
+  const book = menuBook.value
+  closeMenu()
+  if (book) await addCategoryMany(categoryId, [book])
+}
+
+function menuRemove(): void {
+  const book = menuBook.value
+  closeMenu()
+  if (book) removing.value = [book]
+}
+
+/** 右键菜单的单本动作复用同一批实现，只是把「一批」缩成「一本」 */
+async function menuAction(kind: 'read' | 'detail' | 'rematch'): Promise<void> {
+  const book = menuBook.value
+  closeMenu()
+  if (!book) return
+  if (kind === 'read') return openBook(book)
+  if (kind === 'detail') return void router.push(`/book/${book.id}`)
+  pushToast({ level: 'info', message: '重新识别将在 M3-06 提供' })
+}
 
 /**
  * 搜索输入（M1-10）。**200ms 防抖在视图层**：store 只接受终值并重拉第一页，
@@ -389,7 +594,20 @@ watch(
         v-if="library.booksTotal > 0 || library.categoryFilter.length > 0"
         class="mb-4 flex flex-wrap items-center justify-between gap-3"
       >
-        <SegmentedControl v-model="viewMode" :options="viewOptions" />
+        <div class="flex items-center gap-2">
+          <SegmentedControl v-model="viewMode" :options="viewOptions" />
+          <button
+            type="button"
+            class="ct-btn"
+            :class="selectionMode && 'border-accent/50 text-accent'"
+            :aria-pressed="selectionMode"
+            data-batch-toggle
+            @click="toggleSelectionMode"
+          >
+            <AppIcon name="check" :size="14" />
+            {{ selectionMode ? '退出批量' : '批量' }}
+          </button>
+        </div>
 
         <div class="flex items-center gap-2">
           <CategoryFilter @manage="managingCategories = true" />
@@ -405,6 +623,76 @@ watch(
             </button>
           </div>
         </div>
+      </div>
+
+      <!-- 批量操作条（M3-05） -->
+      <div
+        v-if="selectionMode"
+        class="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-accent/30 bg-accent/[0.06] px-3 py-2"
+        data-batch-bar
+      >
+        <span class="text-[12px] text-ink/90" data-batch-count>已选 {{ selected.length }} 本</span>
+        <button type="button" class="ct-btn" data-batch-all @click="selectAll">全选本页</button>
+        <button type="button" class="ct-btn" data-batch-clear @click="selected = []">清空</button>
+
+        <span class="mx-1 h-4 w-px bg-line" />
+
+        <button type="button" class="ct-btn" data-batch-favorite @click="favoriteMany(true, selectedBooks)">
+          <AppIcon name="star" :size="13" />收藏
+        </button>
+        <button type="button" class="ct-btn" data-batch-unfavorite @click="favoriteMany(false, selectedBooks)">
+          取消收藏
+        </button>
+        <button type="button" class="ct-btn" data-batch-shelf @click="picker = picker === 'shelf' ? null : 'shelf'">
+          <AppIcon name="folder" :size="13" />加入书架
+        </button>
+        <button type="button" class="ct-btn" data-batch-category @click="picker = picker === 'category' ? null : 'category'">
+          <AppIcon name="layers" :size="13" />打上分类
+        </button>
+        <button
+          type="button"
+          class="ct-btn border-rose-500/40 text-rose-300 hover:border-rose-400"
+          :disabled="selected.length === 0"
+          data-batch-remove
+          @click="removing = selectedBooks"
+        >
+          移出书库
+        </button>
+      </div>
+
+      <!-- 批量二级选择（书架 / 分类） -->
+      <div
+        v-if="selectionMode && picker"
+        class="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-card px-3 py-2"
+        data-batch-picker
+      >
+        <span class="text-[11.5px] text-dim">{{ picker === 'shelf' ? '加入书架：' : '打上分类：' }}</span>
+        <template v-if="picker === 'shelf'">
+          <button
+            v-for="shelf in library.shelves"
+            :key="shelf.id"
+            type="button"
+            class="ct-btn"
+            :data-batch-shelf-option="shelf.id"
+            @click="addToShelfMany(shelf.id, selectedBooks)"
+          >
+            {{ shelf.name }}
+          </button>
+          <span v-if="library.shelves.length === 0" class="text-[11.5px] text-faint">还没有书架</span>
+        </template>
+        <template v-else>
+          <button
+            v-for="category in library.categories"
+            :key="category.id"
+            type="button"
+            class="ct-btn"
+            :data-batch-category-option="category.id"
+            @click="addCategoryMany(category.id, selectedBooks)"
+          >
+            {{ category.name }}
+          </button>
+          <span v-if="library.categories.length === 0" class="text-[11.5px] text-faint">还没有分类</span>
+        </template>
       </div>
 
       <!-- 加载失败 -->
@@ -446,13 +734,15 @@ watch(
               class="min-w-0"
               @dragover="onCardDragOver"
               @drop="onCardDrop($event, row.index * columnCount + column, book)"
+              @contextmenu.prevent="openMenu($event, book)"
             >
               <BookCard
                 :book="book"
                 :variant="viewMode"
-                :draggable="true"
-                :removable="isShelf"
-                @open="openBook(book)"
+                :draggable="!selectionMode"
+                :removable="isShelf && !selectionMode"
+                :selected="selectionMode && selected.includes(book.id)"
+                @open="onCardOpen(book)"
                 @favorite="toggleFavorite(book)"
                 @remove="removeFromShelf(book)"
                 @detail="router.push(`/book/${book.id}`)"
@@ -515,6 +805,44 @@ watch(
         </button>
       </EmptyState>
     </div>
+
+    <!-- 撤销条：批量操作后出现，只留最近一次 -->
+    <div
+      v-if="undo"
+      class="pointer-events-auto fixed bottom-5 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-lg border border-line bg-elevated px-3 py-2 shadow-[0_10px_28px_rgba(0,0,0,.5)]"
+      data-undo-bar
+    >
+      <span class="text-[12px] text-ink/90">已{{ undo.label }}</span>
+      <button type="button" class="text-[12px] text-accent hover:underline" data-undo-action @click="undoLast">撤销</button>
+      <button type="button" class="text-[11.5px] text-faint hover:text-ink" data-undo-dismiss @click="undo = null">关闭</button>
+    </div>
+
+    <BookContextMenu
+      :open="menu.open"
+      :x="menu.x"
+      :y="menu.y"
+      :book="menu.book"
+      :shelves="library.shelves"
+      :categories="library.categories"
+      @close="closeMenu"
+      @read="menuAction('read')"
+      @detail="menuAction('detail')"
+      @favorite="menuFavorite"
+      @add-shelf="menuAddShelf"
+      @add-category="menuAddCategory"
+      @rematch="menuAction('rematch')"
+      @remove="menuRemove"
+    />
+
+    <ConfirmDialog
+      :open="removing.length > 0"
+      title="从书库移除？"
+      :desc="`这 ${removing.length} 本书会从书库列表里消失，但磁盘上的文件不会被删除，仍保留在原目录。阅读进度与书签会一并保留，重新导入后可恢复。`"
+      confirm-text="移出书库"
+      danger
+      @confirm="confirmRemove"
+      @cancel="removing = []"
+    />
 
     <CategoryManager :open="managingCategories" @close="managingCategories = false" />
   </div>

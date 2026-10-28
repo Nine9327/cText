@@ -89,6 +89,21 @@ export const ipcSchemas = {
   'library:get': z.object({ id: idSchema }),
   /** 收藏开关（M3-01）：传目标值而不是「切换」，重试幂等 */
   'library:toggleFavorite': z.object({ id: idSchema, value: z.boolean() }),
+  // 批量操作（M3-05）。上限 500 与 M3-02 的书架批量同口径
+  'library:setFavoriteMany': z.object({ bookIds: z.array(idSchema).min(1).max(500), value: z.boolean() }),
+  'library:addCategories': z.object({
+    bookIds: z.array(idSchema).min(1).max(500),
+    categoryIds: z.array(idSchema).min(1).max(32)
+  }),
+  'library:removeCategories': z.object({
+    bookIds: z.array(idSchema).min(1).max(500),
+    categoryIds: z.array(idSchema).min(1).max(32)
+  }),
+  'library:removeMany': z.object({ bookIds: z.array(idSchema).min(1).max(500) }),
+  'library:restoreMany': z.object({ bookIds: z.array(idSchema).min(1).max(500) }),
+  /** 单本移除：`deleteFile` 由界面恒传 false，schema 仍允许 true 以免将来加功能时改契约 */
+  'library:remove': z.object({ id: idSchema, deleteFile: z.boolean() }),
+
   /** 元信息编辑（M3-04）。长度上限按「能显示得下」定，不是按数据库能力 */
   'library:update': z.object({
     id: idSchema,
