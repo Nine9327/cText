@@ -75,6 +75,15 @@ const actionsClass = computed(() => {
   return 'right-2 top-1/2 -translate-y-1/2'
 })
 
+/**
+ * 文本要为右上角按钮组预留的右侧宽度。
+ *
+ * 按钮是 24px 方块 + 4px 间距：详情+星标两个 ≈52px，书架页多一个「移出」
+ * 共 80px，各自还要加上 8~10px 的定位偏移。不预留的话，hover 浮现的按钮
+ * 会直接盖在书名/状态文字上——封面视图尤其明显，书名前两个字就被挡住。
+ */
+const padClass = computed(() => (props.removable ? 'pr-[92px]' : 'pr-16'))
+
 function onDragStart(event: DragEvent): void {
   if (!props.draggable) return
   // id 记在模块变量里（见 lib/drag.ts），MIME 只负责让落点认得出「这是本书」
@@ -111,7 +120,10 @@ function onDragStart(event: DragEvent): void {
         <span class="pointer-events-none absolute inset-y-0 left-0 w-[6px] bg-black/25" />
         <span class="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-white/10" />
 
-        <span class="absolute inset-x-0 top-0 line-clamp-2 px-2.5 pt-2.5 text-[10.5px] font-medium leading-[1.35] text-white/90">
+        <span
+          class="absolute inset-x-0 top-0 line-clamp-2 pl-2.5 pt-2.5 text-[10.5px] font-medium leading-[1.35] text-white/90"
+          :class="padClass"
+        >
           {{ book.title }}
         </span>
         <span class="absolute inset-x-0 bottom-0 px-2.5 pb-2 text-[9px] text-white/55">{{ book.author ?? '佚名' }}</span>
@@ -158,7 +170,7 @@ function onDragStart(event: DragEvent): void {
           离线
         </span>
       </div>
-      <div class="min-w-0 flex-1 pr-14">
+      <div class="min-w-0 flex-1" :class="padClass">
         <p class="line-clamp-2 text-[13px] leading-[1.4] text-ink/90">{{ book.title }}</p>
         <p class="mt-1 truncate text-[11.5px] text-faint">{{ book.author ?? '佚名' }}</p>
         <div class="mt-2 flex items-center gap-2">
@@ -177,7 +189,8 @@ function onDragStart(event: DragEvent): void {
       :data-book-id="book.id"
       :title="book.title"
       @click="emit('open')"
-      class="flex w-full items-center gap-3 rounded-md px-2 py-1.5 pr-16 text-left transition-colors duration-120 hover:bg-hover"
+      class="flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left transition-colors duration-120 hover:bg-hover"
+      :class="padClass"
     >
       <div
         class="relative h-[38px] w-[28px] shrink-0 overflow-hidden rounded-sm"

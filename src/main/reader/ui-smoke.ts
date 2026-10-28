@@ -203,6 +203,31 @@ async function scenario(win: BrowserWindow, dir: string, check: CheckFn): Promis
   const atFirst = await press(win, 'ArrowLeft')
   check('第一章首页再往前不出错、不跳章', atFirst.page === 0 && atFirst.title.includes('第1章'), `${atFirst.title} page=${atFirst.page}`)
 
+  // 滚轮翻页（M2-04 补充需求）：一格 deltaY≈120 应当恰好翻一页，上滚回退
+  const afterWheelDown = await run(win, `
+    q('[data-reader-stage-outer]').dispatchEvent(
+      new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true })
+    )
+    await sleep(300)
+    const snap = window.__ctextReader.snapshot()
+    return { page: snap.page, offset: snap.offset }
+  `)
+  check(
+    '滚轮下滚一格翻到下一页',
+    afterWheelDown.page === 1 && afterWheelDown.offset === pageOffsets[1],
+    `page=${afterWheelDown.page} offset=${afterWheelDown.offset}`
+  )
+  const afterWheelUp = await run(win, `
+    await sleep(200)
+    q('[data-reader-stage-outer]').dispatchEvent(
+      new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true })
+    )
+    await sleep(300)
+    const snap = window.__ctextReader.snapshot()
+    return { page: snap.page, offset: snap.offset }
+  `)
+  check('滚轮上滚一格回到上一页', afterWheelUp.page === 0 && afterWheelUp.offset === 0, `page=${afterWheelUp.page}`)
+
   // 翻到末页，再往前一格 → 进入下一章
   await run(win, `
     const probe = window.__ctextReader

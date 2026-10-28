@@ -103,7 +103,7 @@ function acceptDrag(event: DragEvent): boolean {
         <RouterLink to="/library" class="ct-nav-item" active-class="ct-nav-item-active" data-nav="library">
           <AppIcon name="book" :size="15" />
           <span class="flex-1 truncate">全部书籍</span>
-          <span class="text-[11px] text-faint" data-nav-count>{{ library.books.length }}</span>
+          <span class="text-[11px] text-faint" data-nav-count>{{ library.allCount }}</span>
         </RouterLink>
         <RouterLink
           to="/favorites"

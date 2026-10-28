@@ -48,6 +48,14 @@ export const useLibraryStore = defineStore('library', () => {
   const loadError = ref<string | null>(null)
 
   const favCount = ref(0)
+  /**
+   * 侧栏「全部书籍」的计数（当前根目录域的总数）。
+   *
+   * **不能复用 `books.length`**：那是「当前域已加载的列表」，切到收藏页它就
+   * 变成收藏数、超过一页时它只是第一页的 120 本——侧栏数字会跟着页面跳。
+   * 这里单独维护一份「根目录域的全量 count」，与浏览到哪个页面无关。
+   */
+  const allCount = ref(0)
   const recent = ref<BookDTO[]>([])
 
   /**
@@ -222,14 +230,14 @@ export const useLibraryStore = defineStore('library', () => {
   /** 批量移出书库（软删除）。文件不动 */
   async function removeMany(bookIds: string[]): Promise<number> {
     const { removed } = await call('library:removeMany', { bookIds: [...bookIds] })
-    await Promise.all([loadPage(0), loadFavCount(), loadShelves()])
+    await Promise.all([loadPage(0), loadFavCount(), loadShelves(), loadAllCount()])
     return removed
   }
 
   /** 撤销「移出书库」 */
   async function restoreMany(bookIds: string[]): Promise<number> {
     const { restored } = await call('library:restoreMany', { bookIds: [...bookIds] })
-    await Promise.all([loadPage(0), loadFavCount(), loadShelves()])
+    await Promise.all([loadPage(0), loadFavCount(), loadShelves(), loadAllCount()])
     return restored
   }
 
@@ -242,6 +250,12 @@ export const useLibraryStore = defineStore('library', () => {
   async function loadFavCount(): Promise<void> {
     const { total } = await call('books:count', { ...scope(), favoritesOnly: true })
     favCount.value = total
+  }
+
+  /** 侧栏「全部书籍」计数：按根目录域统计，不带收藏/书架/搜索条件 */
+  async function loadAllCount(): Promise<void> {
+    const { total } = await call('books:count', { ...scope0() })
+    allCount.value = total
   }
 
   async function loadRecent(): Promise<void> {
@@ -352,7 +366,7 @@ export const useLibraryStore = defineStore('library', () => {
 
   /** 域切换 / 数据变更后的整表重置 */
   async function reload(): Promise<void> {
-    await Promise.all([loadRoots(), loadShelves(), loadFavCount(), loadRecent(), loadCategories()])
+    await Promise.all([loadRoots(), loadShelves(), loadFavCount(), loadAllCount(), loadRecent(), loadCategories()])
     await loadPage(0)
   }
 
@@ -443,6 +457,7 @@ export const useLibraryStore = defineStore('library', () => {
     loaded,
     loadError,
     favCount,
+    allCount,
     recent,
     categories,
     categoryFilter,

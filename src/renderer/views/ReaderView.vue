@@ -488,6 +488,43 @@ function onPageChange(next: PageSnapshot): void {
   scheduleSave()
 }
 
+// ---------------------------------------------------------------- 滚轮翻页
+
+/**
+ * 滚轮翻页（只作用于分页模式；滚动模式的滚轮就是原生滚动，不在这里拦）。
+ *
+ * 不能「一个 wheel 事件翻一页」：触控板一次手势会吐几十个小增量事件，
+ * 那样一口气能翻过半章；也不能只按增量大小判——鼠标滚轮一格就带 100+ 的
+ * deltaY，阈值高了迟钝、低了触控板误触。做法是「累计 + 冷却」：
+ *   - 增量累计到 50 才翻一页（鼠标一格必过线，触控板靠累计）；
+ *   - 翻页后 150ms 冷却，且 120ms 无新事件就把累计清零（手势已结束）。
+ * 净效果：鼠标一格一页，连续滚动按节奏翻，触控板轻扫也恰好一页。
+ */
+const WHEEL_STEP = 50
+const WHEEL_COOLDOWN = 150
+const WHEEL_GESTURE_MS = 120
+let wheelAcc = 0
+let wheelGestureUntil = 0
+let wheelCooldownUntil = 0
+
+function onWheel(event: WheelEvent): void {
+  if (mode.value !== 'paged' || !chapter.value || chapterError.value || bookError.value) return
+  if (tocOpen.value || notesOpen.value || settingsOpen.value) return
+  const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX
+  if (delta === 0) return
+  // 分页模式下滚轮的语义就是翻页，不再让浏览器拿去做别的（如历史导航）
+  event.preventDefault()
+  const now = performance.now()
+  if (now < wheelCooldownUntil) return
+  if (now > wheelGestureUntil) wheelAcc = 0
+  wheelAcc += delta
+  wheelGestureUntil = now + WHEEL_GESTURE_MS
+  if (Math.abs(wheelAcc) < WHEEL_STEP) return
+  turn(wheelAcc > 0 ? 1 : -1, 'page')
+  wheelAcc = 0
+  wheelCooldownUntil = now + WHEEL_COOLDOWN
+}
+
 function onScrollProgress(next: ScrollSnapshot): void {
   position.value = { offset: next.offset, total: next.total }
   scheduleSave()
@@ -747,6 +784,7 @@ watch(bookId, async () => {
     <main
       class="relative min-h-0 flex-1 overflow-hidden transition-colors duration-200"
       data-reader-stage-outer
+      @wheel="onWheel"
       :style="{ background: palette.bg }"
     >
       <div

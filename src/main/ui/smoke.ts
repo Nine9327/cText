@@ -101,6 +101,12 @@ const UI_CASES = String.raw`
     checkActive('收藏的书籍')
     push('收藏页标题正确', txt(q('[data-page-title]')) === '收藏的书籍', txt(q('[data-page-title]')))
     push('收藏计数 5', (await waitForCount('5 本')) === '5 本', txt(q('[data-book-count]')))
+    // 侧栏「全部书籍」计数挂的是独立的全量 count，不能跟着当前域变成 5
+    push(
+      '切到收藏页后侧栏全部书籍仍为 16',
+      (await waitFor(() => txt(q('[data-nav-count]')) === '16', 6000)) === true,
+      txt(q('[data-nav-count]'))
+    )
 
     // ---------------------------------------------------------------- 3. 我的书架
     await click('[data-nav="shelves"]')
