@@ -64,6 +64,29 @@ function writeSample(dir: string): string {
   return path
 }
 
+/** 4 卷 × 300 章 = 1204 条目录项（卷也是章节，占用 idx） */
+const TOC_VOLUMES = 4
+const TOC_PER_VOLUME = 300
+
+/**
+ * 千章样本。目录项数要真的上千，才能验「虚拟滚动下 DOM 行数恒定」——
+ * 用 30 章的数据测出来的行数上限没有意义。
+ */
+function writeThousand(dir: string): string {
+  const lines = ['书名：千章样本', '']
+  let chapter = 0
+  for (let volume = 1; volume <= TOC_VOLUMES; volume += 1) {
+    lines.push(`第${volume}卷 卷${volume}`, `本卷共 ${TOC_PER_VOLUME} 章。`)
+    for (let i = 0; i < TOC_PER_VOLUME; i += 1) {
+      chapter += 1
+      lines.push(`第${chapter}章 第${chapter}章标题`, `这里是第${chapter}章的正文。`, '')
+    }
+  }
+  const path = join(dir, '千章样本.txt')
+  writeFileSync(path, lines.join('\n'), 'utf8')
+  return path
+}
+
 async function waitForTask(taskId: string, timeoutMs: number): Promise<string> {
   const terminal = new Set(['done', 'cancelled', 'failed'])
   const deadline = Date.now() + timeoutMs
@@ -77,15 +100,33 @@ async function waitForTask(taskId: string, timeoutMs: number): Promise<string> {
 
 export async function runReaderUiSmoke(win: BrowserWindow, dir: string): Promise<void> {
   const checks: Check[] = []
-  const check = (name: string, ok: boolean, detail = ''): void => {
+  // 逐条打印而不是最后统一打印：这套自检跑 25+ 条，卡住时「没有任何输出」
+  // 会让人完全看不出停在哪一步（第一次跑千章目录时就是这么超时的）
+  const check: CheckFn = (name, ok, detail = '') => {
     checks.push({ name, ok: !!ok, detail })
+    console.log(`SMOKE READERUI ${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`)
   }
 
+  // 整段包在 try 里：抛异常时如果没人接住，进程会一直挂着等超时，
+  // 表现成「没有任何断言输出」——那是最难查的一种失败。
+  try {
+    await scenario(win, dir, check)
+  } catch (err) {
+    const message = err instanceof Error ? `${err.message} ${err.stack ?? ''}` : String(err)
+    check('自检脚本执行', false, message.slice(0, 300))
+  }
+  emit(checks)
+}
+
+type CheckFn = (name: string, ok: boolean, detail?: string) => void
+
+async function scenario(win: BrowserWindow, dir: string, check: CheckFn): Promise<void> {
   // 窗口尺寸先固定：分页结果与视口大小强相关，不定死的话基线会随环境漂
   win.setSize(1280, 860)
   await sleep(300)
 
-  const file = writeSample(dir)
+  writeSample(dir)
+  writeThousand(dir)
   const taskId = startImport(dir, { registerAsRoot: true }, { coversDir: coversDir() }).taskId
   const phase = await waitForTask(taskId, 30_000)
   const row = getDb()
@@ -94,9 +135,16 @@ export async function runReaderUiSmoke(win: BrowserWindow, dir: string): Promise
   const epub = getDb()
     .prepare('SELECT id, chapter_count AS chapters FROM books WHERE rel_path = ? AND deleted_at IS NULL')
     .get('toc_volume.epub') as { id: string; chapters: number } | undefined
-  check('样本导入成功（3 章 TXT + 1 本 EPUB）', phase === 'done' && row?.chapters === 3 && !!epub, `${phase} 章数 ${row?.chapters} / epub ${epub?.chapters ?? '缺'} / ${file}`)
+  const thousand = getDb()
+    .prepare('SELECT id, chapter_count AS chapters FROM books WHERE rel_path = ? AND deleted_at IS NULL')
+    .get('千章样本.txt') as { id: string; chapters: number } | undefined
+  check(
+    '样本导入成功（3 章 TXT + 千章 TXT + 1 本 EPUB）',
+    phase === 'done' && row?.chapters === 3 && !!epub && thousand?.chapters === TOC_VOLUMES * (TOC_PER_VOLUME + 1),
+    `${phase} 章数 ${row?.chapters} / 千章 ${thousand?.chapters ?? '缺'} / epub ${epub?.chapters ?? '缺'}`
+  )
   if (!row) {
-    emit(checks)
+    check('样本可用', false, '库里没有找到 分页样本.txt')
     return
   }
 
@@ -107,7 +155,7 @@ export async function runReaderUiSmoke(win: BrowserWindow, dir: string): Promise
   const opened = await waitUntil(async () => stateOf(win), 15_000)
   check('阅读器打开并出正文', !!opened && opened.total >= CHAPTER_CHARS, opened ? `total=${opened.total}` : '10s 内没拿到分页快照')
   if (!opened) {
-    emit(checks)
+    check('阅读器可打开', false, '拿不到分页快照')
     return
   }
 
@@ -197,10 +245,12 @@ export async function runReaderUiSmoke(win: BrowserWindow, dir: string): Promise
     })
   `)
   const zoomInfo = JSON.parse(zoomCheck as string) as { page: number; pageStart: number; anchorPage: number }
+  // 页数不一定变：3000 字这个量级，18→21px 有可能刚好还是同样的页数。
+  // 「重排生效」的判据是**页边界变了**（页数或当前页首偏移），而不是页数一定增加。
   check(
-    '改字号确实重排了（字号变大、页数变多）',
-    zoomed.fontSize !== fontSizeBefore && zoomed.pages > before.pages,
-    `${fontSizeBefore} → ${zoomed.fontSize}，${before.pages} → ${zoomed.pages} 页`
+    '改字号确实重排了（字号变了，且页数或页边界随之改变）',
+    zoomed.fontSize !== fontSizeBefore && (zoomed.pages !== before.pages || zoomInfo.pageStart !== before.offset),
+    `${fontSizeBefore} → ${zoomed.fontSize}，${before.pages} → ${zoomed.pages} 页，页首 ${before.offset} → ${zoomInfo.pageStart}`
   )
   check(
     '改字号后位置不跳：锚点字符仍在当前页',
@@ -336,18 +386,161 @@ export async function runReaderUiSmoke(win: BrowserWindow, dir: string): Promise
     `锚点 ${anchor} → 顶部 ${backToScroll.offset}`
   )
 
+  // ---------------------------------------------------------------- 目录（M2-06）
+  if (thousand) {
+    await run(win, `location.hash = '#/reader/${thousand.id}'; return true`)
+    await waitUntil(async () => ((await readerTitle(win)).includes('千章样本') ? true : null), 10_000)
+    // 首章是「第1卷」这个卷标题，正文只有一行；这里顺带确认正文真的渲染出来了
+    const firstBody = (await run(win, `
+      const el = q('[data-scroll-content]') || q('[data-page-content]')
+      return el ? el.textContent.trim() : ''
+    `)) as string
+    check('千章样本首章渲染出正文', firstBody.length > 0, firstBody.slice(0, 30) || '正文为空')
+
+    await run(win, `q('[data-reader-toc]').click(); return true`)
+
+    const tocOpenState = await waitUntil(async () => {
+      const state = await tocStateOf(win)
+      return state.total > 0 ? state : null
+    }, 10_000)
+    check(
+      '千章目录一次加载完整（4 卷 + 1200 章）',
+      tocOpenState?.chapters === TOC_VOLUMES * (TOC_PER_VOLUME + 1),
+      tocOpenState ? `${tocOpenState.chapters} 章 / 可见 ${tocOpenState.total} 行` : '10s 内抽屉没打开'
+    )
+    check(
+      '虚拟滚动：千章目录的 DOM 行数保持在一屏量级',
+      (tocOpenState?.rows ?? 999) < 60,
+      `DOM ${tocOpenState?.rows} 行 / 逻辑 ${tocOpenState?.total} 行`
+    )
+
+    if (shot) writeFileSync(shot.replace(/\.png$/i, '-toc.png'), (await win.capturePage()).toPNG())
+
+    // 滚到底：DOM 行数不能跟着总数涨，且能滚到最后一条
+    const bottom = await run(win, `
+      const box = q('[data-toc-total]')
+      box.scrollTop = box.scrollHeight
+      await sleep(200)
+      const rows = qa('[data-toc-row]')
+      const last = rows[rows.length - 1]
+      return JSON.stringify({
+        rows: rows.length,
+        last: last ? Number(last.dataset.tocRow) : -1,
+        lastText: last ? txt(last) : ''
+      })
+    `)
+    const bottomState = JSON.parse(bottom as string) as { rows: number; last: number; lastText: string }
+    check(
+      '滚到目录末尾：DOM 行数仍受限，且能到最后一条',
+      bottomState.rows < 60 && bottomState.last === TOC_VOLUMES * (TOC_PER_VOLUME + 1) - 1,
+      `DOM ${bottomState.rows} 行，末尾 idx=${bottomState.last}（${bottomState.lastText.slice(0, 14)}）`
+    )
+
+    // 折叠第一卷：可见行数应减少 300，且耗时在 100ms 内（含一帧）
+    const collapse = await run(win, `
+      const box = q('[data-toc-total]')
+      box.scrollTop = 0
+      await sleep(120)
+      const toggle = q('[data-toc-toggle]')
+      const before = Number(q('[data-toc-total]').dataset.tocTotal)
+      const started = performance.now()
+      toggle.click()
+      await new Promise((r) => requestAnimationFrame(r))
+      const cost = performance.now() - started
+      await sleep(120)
+      return JSON.stringify({
+        before,
+        after: Number(q('[data-toc-total]').dataset.tocTotal),
+        cost,
+        rows: qa('[data-toc-row]').length
+      })
+    `)
+    const collapsed = JSON.parse(collapse as string) as {
+      before: number
+      after: number
+      cost: number
+      rows: number
+    }
+    check(
+      '折叠一卷：可见行数减少 300 行且 DOM 仍然有界',
+      collapsed.after === collapsed.before - TOC_PER_VOLUME && collapsed.rows < 60,
+      `${collapsed.before} → ${collapsed.after} 行，DOM ${collapsed.rows} 行`
+    )
+    check(
+      '折叠耗时 < 100ms（含一帧渲染）',
+      collapsed.cost < 100,
+      `${collapsed.cost.toFixed(1)}ms`
+    )
+
+    const expand = await run(win, `
+      q('[data-toc-toggle]').click()
+      await sleep(150)
+      return Number(q('[data-toc-total]').dataset.tocTotal)
+    `)
+    check('再展开恢复到全部 1204 行', Number(expand) === TOC_VOLUMES * (TOC_PER_VOLUME + 1), `${expand} 行`)
+
+    // 跳转：滚到第 600 行附近点一条
+    const jump = await run(win, `
+      const box = q('[data-toc-total]')
+      box.scrollTop = 580 * 30
+      await sleep(200)
+      const row = qa('[data-toc-row]').find((el) => Number(el.dataset.tocRow) >= 600)
+      if (!row) return JSON.stringify({ ok: false })
+      const idx = Number(row.dataset.tocRow)
+      const title = txt(row)
+      row.click()
+      await sleep(600)
+      return JSON.stringify({ ok: true, idx, title })
+    `)
+    const jumped = JSON.parse(jump as string) as { ok: boolean; idx: number; title: string }
+    const afterTitle = await readerTitle(win)
+    const drawerClosed = !(await run(win, `return !!q('[data-toc]')`))
+    check(
+      '点目录跳转：抽屉关闭、正文切到该章',
+      jumped.ok && drawerClosed && afterTitle.includes(jumped.title.slice(0, 8)),
+      jumped.ok ? `跳到「${jumped.title}」→ 当前「${afterTitle}」` : '没找到可点的行'
+    )
+
+    const margins = JSON.parse(
+      (await run(win, `
+        const stage = q('[data-reader-stage]')
+        const content = q('[data-scroll-content]') || q('[data-page-content]')
+        const para = content ? content.querySelector('p') : null
+        const stageBox = stage.getBoundingClientRect()
+        return JSON.stringify({
+          stageLeft: Math.round(stageBox.left),
+          stagePad: getComputedStyle(stage).paddingLeft,
+          contentLeft: content ? Math.round(content.getBoundingClientRect().left) : -1,
+          paraLeft: para ? Math.round(para.getBoundingClientRect().left) : -1,
+          fontSize: content ? getComputedStyle(content).fontSize : ''
+        })
+      `)) as string
+    ) as { stageLeft: number; stagePad: string; contentLeft: number; paraLeft: number; fontSize: string }
+    check('正文左边距 = 排版设置的页边距', margins.contentLeft >= 64, JSON.stringify(margins))
+
+    if (shot) writeFileSync(shot.replace(/\.png$/i, '-jump.png'), (await win.capturePage()).toPNG())
+
+    // 重新打开：当前章要高亮
+    await run(win, `q('[data-reader-toc]').click(); await sleep(300); return true`)
+    const active = (await run(win, `
+      const el = q('[data-toc-active]')
+      return el ? Number(el.dataset.tocRow) : -1
+    `)) as number
+    check('重开目录：当前章高亮且自动滚到可视区', active === jumped.idx, `高亮 idx=${active} / 跳转 idx=${jumped.idx}`)
+    await run(win, `q('[data-toc-close]').click(); await sleep(200); return true`)
+  }
+
   // ---------------------------------------------------------------- 退出
   await run(win, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await sleep(200); return true`)
   const hash = (await run(win, 'return location.hash')) as string
   check('按 Esc 回到书库', hash.startsWith('#/library'), hash)
-
-  emit(checks)
 }
 
 /** 每次注入都重新声明这几个助手（executeJavaScript 每次是独立作用域） */
 function run(win: BrowserWindow, body: string): Promise<unknown> {
   return win.webContents.executeJavaScript(`(async () => {
     const q = (s) => document.querySelector(s)
+    const qa = (s) => Array.from(document.querySelectorAll(s))
     const txt = (el) => (el && el.textContent ? el.textContent : '').replace(/\\s+/g, ' ').trim()
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
     const waitFor = async (fn, timeout = 8000) => {
@@ -408,6 +601,29 @@ async function scrollStateOf(win: BrowserWindow): Promise<{ mode: string; offset
   return JSON.parse(raw) as { mode: string; offset: number; scrollTop: number }
 }
 
+/**
+ * 只读阅读器标题。TOC 这一段跑在**滚动模式**下（上一节的模式切换留下的状态），
+ * 此时 `__ctextReader` 探针不存在——凡是要断言「当前是哪一章」的地方都不能走分页快照。
+ */
+async function readerTitle(win: BrowserWindow): Promise<string> {
+  return (await run(win, `return txt(q('[data-reader-title]'))`)) as string
+}
+
+/** 目录抽屉的状态：章节数、逻辑行数、当前 DOM 行数 */
+async function tocStateOf(
+  win: BrowserWindow
+): Promise<{ chapters: number; total: number; rows: number }> {
+  const raw = (await run(win, `
+    const box = q('[data-toc-total]')
+    return JSON.stringify({
+      chapters: box ? Number(box.dataset.tocChapters) : -1,
+      total: box ? Number(box.dataset.tocTotal) : -1,
+      rows: qa('[data-toc-row]').length
+    })
+  `)) as string
+  return JSON.parse(raw) as { chapters: number; total: number; rows: number }
+}
+
 /** 按一次键并等重排/换章落定 */
 async function press(win: BrowserWindow, key: string, wait = 300): Promise<SnapshotState> {
   await run(win, `window.dispatchEvent(new KeyboardEvent('keydown', { key: '${key}', bubbles: true })); return true`)
@@ -436,9 +652,7 @@ async function gotoPage(win: BrowserWindow, page: number): Promise<SnapshotState
 }
 
 function emit(checks: Check[]): void {
-  for (const item of checks) {
-    console.log(`SMOKE READERUI ${item.ok ? 'PASS' : 'FAIL'} ${item.name}${item.detail ? ` (${item.detail})` : ''}`)
-  }
+  // 每条在 check() 里已经打印过了，这里只补总结与退出码
   const failed = checks.filter((item) => !item.ok).length
   console.log(`SMOKE READERUI SUMMARY ${checks.length - failed}/${checks.length}`)
   app.exit(failed === 0 ? 0 : 1)

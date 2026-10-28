@@ -18,10 +18,11 @@ import AppIcon from '@/components/common/AppIcon.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import PagedView from '@/components/reader/PagedView.vue'
 import ScrollView from '@/components/reader/ScrollView.vue'
+import TocDrawer from '@/components/reader/TocDrawer.vue'
 import type { IconName } from '@/components/common/icons'
 import { call } from '@/api'
 import { ERROR_CODES } from '@shared/errors'
-import type { BookDetailDTO, ChapterContentDTO } from '@shared/dto'
+import type { BookDetailDTO, ChapterContentDTO, ChapterDTO } from '@shared/dto'
 import type { PageSnapshot } from '@/reader/paginate'
 import type { ScrollSnapshot } from '@/reader/scroll'
 import { FONT_SIZE_MAX, FONT_SIZE_MIN, useReaderStore, type ReaderMode } from '@/stores/reader'
@@ -49,6 +50,10 @@ const position = ref({ offset: 0, total: 0 })
 const snapshot = ref<PageSnapshot>({ page: 0, pages: 1, offset: 0, total: 0 })
 /** 章节正文请求在途：用来显示细进度条，但**不清空**已有正文（否则每次翻章都闪白） */
 const pending = ref(false)
+/** 目录（M2-06）：首次打开抽屉时才拉，进阅读器不该白跑一次 IPC */
+const chapters = ref<ChapterDTO[]>([])
+const tocOpen = ref(false)
+let chaptersLoaded = false
 
 interface PanelError {
   icon: IconName
@@ -180,6 +185,34 @@ function goChapter(idx: number, atEnd = false): void {
   void loadChapter(idx, atEnd ? -1 : 0)
 }
 
+// ---------------------------------------------------------------- 目录（M2-06）
+
+async function ensureChapters(): Promise<void> {
+  if (chaptersLoaded) return
+  try {
+    chapters.value = await call('reader:chapters', { bookId: bookId.value })
+    chaptersLoaded = true
+  } catch {
+    // 目录拉不到不该拦住阅读：正文已经在屏幕上，抽屉里空着即可
+    chapters.value = []
+  }
+}
+
+async function toggleToc(): Promise<void> {
+  if (tocOpen.value) {
+    tocOpen.value = false
+    return
+  }
+  await ensureChapters()
+  tocOpen.value = true
+}
+
+function jumpTo(idx: number): void {
+  tocOpen.value = false
+  if (idx === chapterIdx.value) return
+  void loadChapter(idx, 0)
+}
+
 // ---------------------------------------------------------------- 翻页 / 滚动
 
 const paged = ref<InstanceType<typeof PagedView> | null>(null)
@@ -236,6 +269,12 @@ function onKeydown(event: KeyboardEvent): void {
     return
   }
 
+  if (event.ctrlKey && (event.key === 't' || event.key === 'T')) {
+    event.preventDefault()
+    void toggleToc()
+    return
+  }
+
   switch (event.key) {
     case 'ArrowRight':
     case 'PageDown':
@@ -261,7 +300,9 @@ function onKeydown(event: KeyboardEvent): void {
       break
     case 'Escape':
       event.preventDefault()
-      void router.push('/library')
+      // 抽屉开着时 Esc 只关抽屉：读者的意图是「退出目录」，不是「退出阅读」
+      if (tocOpen.value) tocOpen.value = false
+      else void router.push('/library')
       break
     default:
       break
@@ -294,16 +335,23 @@ watch(bookId, async () => {
   book.value = null
   chapter.value = null
   chapterError.value = null
+  chapters.value = []
+  chaptersLoaded = false
+  tocOpen.value = false
   if (await loadBook()) await loadChapter(0)
 })
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col bg-app" data-reader :data-reader-mode="mode">
+  <div class="relative flex h-full min-h-0 flex-col bg-app" data-reader :data-reader-mode="mode">
     <!-- 顶栏：返回 / 书名 · 章名 / 页码 / 字号 -->
     <header class="flex h-11 shrink-0 items-center gap-3 border-b border-line px-3">
       <button class="ct-icon-btn" title="返回书库（Esc）" data-reader-back @click="router.push('/library')">
         <AppIcon name="chevron-left" :size="16" />
+      </button>
+
+      <button class="ct-icon-btn" title="目录（Ctrl+T）" data-reader-toc @click="toggleToc">
+        <AppIcon name="list" :size="15" />
       </button>
 
       <div class="min-w-0 flex-1">
@@ -357,6 +405,7 @@ watch(bookId, async () => {
     <main class="relative min-h-0 flex-1 overflow-hidden bg-[#f7f5ef]">
       <div
         class="absolute inset-0 text-[#2b2b2b]"
+        data-reader-stage
         :style="{
           paddingLeft: `${reader.typography.marginX}px`,
           paddingRight: `${reader.typography.marginX}px`,
@@ -411,6 +460,14 @@ watch(bookId, async () => {
         <div class="h-full w-1/3 animate-pulse bg-accent/70" />
       </div>
     </main>
+
+    <TocDrawer
+      :open="tocOpen"
+      :chapters="chapters"
+      :current="chapterIdx"
+      @jump="jumpTo"
+      @close="tocOpen = false"
+    />
 
     <!-- 底栏：上一章 / 进度 / 下一章 -->
     <footer class="flex h-10 shrink-0 items-center gap-3 border-t border-line px-3">

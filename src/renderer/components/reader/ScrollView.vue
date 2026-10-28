@@ -172,8 +172,10 @@ function installProbe(): void {
 
 <style scoped>
 .ct-scroll-viewport {
-  position: absolute;
-  inset: 0;
+  /* 同 PagedView：用 100% 宽高而不是 absolute inset-0，否则父元素的页边距 padding 会被忽略 */
+  position: relative;
+  width: 100%;
+  height: 100%;
   overflow-x: hidden;
   overflow-y: auto;
   /* 滚到底不要带着整个页面继续滚：阅读器之外没有可滚的东西，弹性回弹只会让人以为卡了 */

@@ -48,6 +48,7 @@ export const INVOKE_CHANNELS = defineChannels<IpcChannel>()([
   'import:cancel',
 
   'reader:content',
+  'reader:chapters',
   'reader:saveProgress',
 
   'source:import',

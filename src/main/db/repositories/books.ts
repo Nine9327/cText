@@ -369,6 +369,18 @@ export function getShelf(db: Db, shelfId: string): import('@shared/dto').ShelfDT
 }
 
 /**
+ * 整本目录（M2-06）。
+ *
+ * 只取 `idx / title / level`：抽屉要渲染上千行，`anchor/length` 这些正文用的字段
+ * 一个都不需要，把它们塞进 DTO 会让千章目录多搬几十 KB 的无用字符串。
+ */
+export function listChapters(db: Db, bookId: string): import('@shared/dto').ChapterDTO[] {
+  return db
+    .prepare('SELECT idx, title, level FROM chapters WHERE book_id = ? ORDER BY idx')
+    .all(bookId) as { idx: number; title: string; level: number }[]
+}
+
+/**
  * 单本书的完整信息（`library:get`，M2-04 起被阅读器使用）。
  *
  * 与列表查询分开写一条 SQL 的理由：详情需要 `intro / word_count / rel_path` 等

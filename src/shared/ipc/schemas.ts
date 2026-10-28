@@ -87,11 +87,12 @@ export const ipcSchemas = {
   'shelves:get': z.object({ shelfId: idSchema }),
   'shelves:list': z.void(),
 
-  // 阅读器（M2-01）
+  // 阅读器（M2-01 / 目录 M2-06）
   'reader:content': z.object({
     bookId: idSchema,
     chapterIdx: z.number().int().min(0).max(1_000_000)
-  })
+  }),
+  'reader:chapters': z.object({ bookId: idSchema })
 } satisfies Partial<{ [K in keyof IpcMap]: z.ZodType<IpcMap[K]['input']> }>
 
 /** 有 schema 的通道 = 允许注册 handler 的通道 */

@@ -16,6 +16,7 @@ import type {
   BookQuery,
   BookSort,
   ChapterContentDTO,
+  ChapterDTO,
   EchoRequest,
   EchoResponse,
   ImportOptions,
@@ -97,6 +98,8 @@ export type IpcMap = {
 
   // 阅读
   'reader:content': { input: { bookId: string; chapterIdx: number }; output: ChapterContentDTO }
+  /** 整本目录（M2-06）。一次全给：千章也就几十 KB，分页反而让抽屉要处理「加载中」 */
+  'reader:chapters': { input: { bookId: string }; output: ChapterDTO[] }
   'reader:saveProgress': { input: ProgressDTO; output: void }
 
   // 书源

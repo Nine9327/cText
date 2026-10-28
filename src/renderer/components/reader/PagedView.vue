@@ -211,8 +211,15 @@ function installProbe(): void {
 
 <style scoped>
 .ct-page-viewport {
-  position: absolute;
-  inset: 0;
+  /*
+   * **不要用 absolute inset-0**：绝对定位的包含块是父元素的 padding box，
+   * 父元素（阅读器舞台）上的页边距 padding 会被完整忽略——表现为「正文贴边」，
+   * 而 getComputedStyle 里 padding 依然是 64px，非常难查。
+   * 用普通流的 100% 宽高，才是「在父元素内容区里」，页边距才会生效。
+   */
+  position: relative;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
 }
 
