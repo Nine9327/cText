@@ -218,6 +218,11 @@ export interface ChapterContentDTO {
   html: string
   hasPrev: boolean
   hasNext: boolean
+  /**
+   * 本章超过单次读取窗口（M2-02，4MB），`html` 只是开头一段。
+   * 病态文件（整本书一章）靠它把内存关在窗口内，正常章节恒为 undefined。
+   */
+  truncated?: boolean
 }
 
 export interface ProgressDTO {

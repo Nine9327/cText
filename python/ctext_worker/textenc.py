@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import codecs
+
 # BOM 表顺序敏感：UTF-32 LE 的 BOM 是 FF FE 00 00，是 UTF-16 LE 的 FF FE 的超集，
 # 必须排在前面，否则 UTF-32 文件会被误判成 UTF-16
 BOM_TABLE: tuple[tuple[bytes, str], ...] = (
@@ -149,9 +151,14 @@ def detect_from_bytes(sample: bytes) -> str:
         if sample.startswith(bom):
             return encoding
 
+    # 用**增量解码器**而不是 `sample.decode("utf-8")`：样本是按固定字节数
+    # （SAMPLE_SIZE）截出来的，末尾很可能正好切在一个汉字中间。严格解码会把
+    # 这种「截断」当成「不是 UTF-8」，于是整本 UTF-8 中文书被误判成 GB18030，
+    # 打开就是满屏乱码。`final=False` 只把末尾没组完的字节留在缓冲区，
+    # 真正的非法字节序列照样会抛 UnicodeDecodeError。
     try:
-        sample.decode("utf-8")
-        # 严格解码通过就认 utf-8：这是确定性判据，不需要再问统计模型
+        codecs.getincrementaldecoder("utf-8")().decode(sample, final=False)
+        # 前缀能解就是 utf-8：这是确定性判据，不需要再问统计模型
         return "utf-8"
     except UnicodeDecodeError:
         pass

@@ -19,6 +19,7 @@ UTF-16/32 无法按 `b'\\n'` 切分，走整体解码后用「重新编码长度
 
 from __future__ import annotations
 
+import codecs
 import os
 import re
 
@@ -40,6 +41,13 @@ WHOLE_BOOK_TITLE = "全文"
 
 # 元数据提取只读前这么多行，避免为了找「作者：」把 200MB 读一遍
 META_SCAN_LINES = 300
+
+# 单次读取的窗口大小（M2-02）。一章通常几十 KB，4MB 足够覆盖正常章节；
+# 病态文件（整本书一章）靠它兜住内存，由调用方看到 hasMore 后继续要下一窗。
+DEFAULT_READ_BYTES = 4 * 1024 * 1024
+
+# 调用方可以调大，但不允许无限大：一次 100MB 的读取就等于把 OOM 交给上游
+MAX_READ_BYTES = 16 * 1024 * 1024
 
 # 简介截断长度
 INTRO_LIMIT = 400
@@ -324,6 +332,65 @@ def parse_meta(params: dict) -> dict:
         encoding, bom_len = detect_encoding(path)
 
     return txt_meta(path, encoding, bom_len)
+
+
+@method("parse.txt.read")
+def parse_txt_read(params: dict) -> dict:
+    """按字节区间读一段正文（M2-02）。
+
+    为什么这一段在 Python 而不是 Node：
+      * 编码知识只在一处（`textenc.normalize_encoding` + 各 codec），
+        Node 侧要再维护一份「Python codec 名 → WHATWG 标签」的映射，迟早对不上；
+      * 半字符边界要用增量解码器才能精确处理（见下），Python 的
+        `codecs.getincrementaldecoder` 直接给得出「还剩几个字节没组完」；
+      * 大文件的区间读与将来的流式索引都在同一侧，省一次跨进程搬字节。
+    """
+    path = require_path(params)
+    encoding = normalize_encoding(params.get("encoding"))
+    size = os.path.getsize(path)
+
+    offset = min(max(0, int(params.get("offset") or 0)), size)
+    raw_length = params.get("length")
+    remaining = size - offset if raw_length is None else max(0, int(raw_length))
+    max_bytes = int(params.get("maxBytes") or DEFAULT_READ_BYTES)
+    max_bytes = max(1, min(max_bytes, MAX_READ_BYTES))
+
+    want = min(remaining, max_bytes)
+    if want <= 0:
+        return {"text": "", "bytesConsumed": 0, "hasMore": remaining > 0, "eof": remaining <= 0}
+
+    with open(path, "rb") as fh:
+        fh.seek(offset)
+        chunk = fh.read(want)
+
+    has_more = len(chunk) < remaining
+    consumed = len(chunk)
+
+    # 窄编码：把窗口收在最后一个换行之后，否则每次窗口结尾都会吊着半句话。
+    # UTF-16/32 不能按 b"\n" 切——0x0A 可能只是某个码元的高/低字节。
+    if has_more and not is_wide_encoding(encoding):
+        cut = chunk.rfind(b"\n")
+        if cut >= 0:
+            chunk = chunk[: cut + 1]
+            consumed = cut + 1
+
+    # 增量解码：末尾不完整的字符留在 decoder 里，consumed 相应回退，
+    # 这样调用方从 consumed 继续读时不会把半个字符读重或读丢，
+    # 也不会在正文里露出 U+FFFD。
+    decoder = codecs.getincrementaldecoder(encoding)(errors="replace")
+    text = decoder.decode(chunk, final=not has_more)
+    tail, _ = decoder.getstate()
+    consumed -= len(tail)
+
+    if offset == 0:
+        text = text.lstrip("\ufeff")
+
+    return {
+        "text": text,
+        "bytesConsumed": consumed,
+        "hasMore": has_more or bool(tail),
+        "eof": not (has_more or tail),
+    }
 
 
 @method("parse.txt.outline")

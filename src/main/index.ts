@@ -29,6 +29,7 @@ import { seedUiFixture } from './ui/ui-fixture'
 import { runListSmoke } from './ui/list-smoke'
 import { runSearchSmoke } from './ui/search-smoke'
 import { runReaderSmoke } from './reader/smoke'
+import { runReaderBigSmoke } from './reader/big-smoke'
 import { runM1Smoke } from './milestone/m1-smoke'
 import { runImportUiSmoke } from './ui/import-ui-smoke'
 import {
@@ -358,6 +359,12 @@ if (!gotLock) {
     // M1-10 自检：搜索（FTS 前缀命中 / 索引同步 / 200ms 防抖 / 离线标注）
     if (!app.isPackaged && mainWindow && process.env['CTEXT_SEARCH_SMOKE'] === '1') {
       await runSearchSmoke(mainWindow)
+      return
+    }
+
+    // M2-02 自检：大文件（200MB 不 OOM / 翻页不卡 / 单章超窗）
+    if (!app.isPackaged && process.env['CTEXT_READER_BIG_SMOKE'] === '1') {
+      await runReaderBigSmoke()
       return
     }
 

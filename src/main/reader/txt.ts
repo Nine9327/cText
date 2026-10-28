@@ -1,52 +1,52 @@
 /**
- * TXT 正文读取（M2-01）。
+ * TXT 正文读取（M2-01 / M2-02）。
  *
- * 只做三件事：按章节的**字节区间**读一段、按探测出的编码解码、切成段落并转义成 HTML。
- * 不做分页、不做排版——那是 M2-04 的事。
+ * **读取本身在 Python worker 里做**（`parse.txt.read`），这里只做编排与呈现：
+ *   1. 编码知识只在一处（`textenc` + 各 codec）。Node 侧若自己维护一份
+ *      「Python codec 名 → WHATWG 标签」的映射，迟早和 Python 对不上。
+ *   2. 窗口末尾的半个字符要靠增量解码器精确回退字节数，Python 直接给得出。
+ *   3. 大文件的区间读与将来的流式索引都在同一侧，省一次跨进程搬字节。
  *
- * 三个约束：
- *   1. **必须按字节 seek**。`chapters.anchor` 是字节偏移（M1-04 的产出），
- *      用字符偏移会在大段非 ASCII 文本里整体错位。章节起始天然落在字符边界上，
- *      因为偏移本来就是从「重新编码后的长度」累计出来的。
- *   2. **解码必须用书自己的编码**。GBK 的书按 UTF-8 解会得到一屏乱码，
- *      而用户看不出是编码问题还是文件坏了。
- *   3. **绝不把原文直接拼进 HTML**。正文里出现 `<` 是常态（数学式、颜文字），
- *      直接拼会把一章吞掉半页。所有文本都过 escapeHtml。
+ * **一次读取不会把整本书抖进内存**：worker 侧有 4MB 窗口上限，超出时回
+ * `hasMore`，由调用方标 `truncated`（继续读由 M2-04 的分页按需驱动）。
+ * 一条 200MB 的无章节 TXT 因此只占一个窗口的内存，而不是 400MB 的字符串。
  *
- * 一次性读整章进内存：单章通常几十 KB，够了。**>50MB 的流式分段读属 M2-02**，
- * 那时会把这里换成 worker 侧的 `parse.txt.read`（带索引与区间读），
- * 本文件的解码/分段逻辑保持不动。
+ * 分段的两个细节：
+ *   - 空行不产出空段落：中文 TXT 段落之间普遍隔一个空行，照搬成 `<p></p>`
+ *     会把段距撑成两倍。每段缩进交给 CSS（text-indent）。
+ *   - 首行若等于章标题则丢掉：`chapters.offset` 指向标题行本身（M1-04 的产出），
+ *     而 DTO 已经把标题单独给出。只在「完全相同」时丢，所以「无章节标记的书
+ *     （首章=全文）」不受影响。
  */
-import { open } from 'node:fs/promises'
+import { getPythonBridge } from '../bridge'
 
-/** Python codec 名 → WHATWG 解码标签。TextDecoder 只认后者 */
-const DECODER_LABELS: Record<string, string> = {
-  'utf-8': 'utf-8',
-  'utf-8-sig': 'utf-8',
-  // BOM 由 TextDecoder 默认剥掉（ignoreBOM=false），所以 -sig 直接归到 utf-8
-  'utf-16': 'utf-16le',
-  'utf-16-le': 'utf-16le',
-  'utf-16-be': 'utf-16be',
-  gb2312: 'gb18030',
-  gbk: 'gb18030',
-  gb18030: 'gb18030',
-  big5: 'big5',
-  'big5-hkscs': 'big5'
+export interface TxtWindow {
+  /** 已解码的纯文本（**未转义**） */
+  text: string
+  /** 本次实际消费的字节数（可能小于请求长度：收在行边界或半个字符之前） */
+  bytesConsumed: number
+  /** 这一段之后还有内容（窗口被 maxBytes 截住） */
+  hasMore: boolean
 }
 
-/** 未知编码一律按 UTF-8 解：解出乱码也比抛错让人打不开书好 */
-export function decoderLabel(encoding: string | null): string {
-  if (!encoding) return 'utf-8'
-  return DECODER_LABELS[encoding.trim().toLowerCase()] ?? 'utf-8'
-}
-
-export function decodeBytes(buffer: Buffer, encoding: string | null): string {
-  const label = decoderLabel(encoding)
-  try {
-    return new TextDecoder(label).decode(buffer)
-  } catch {
-    return new TextDecoder('utf-8').decode(buffer)
-  }
+/**
+ * 读一章的一段。`length` 为 null 表示「到文件末尾」。
+ *
+ * 超时用默认 15s：窗口最大 4MB，慢盘也就几百毫秒；真超时说明是别的问题，
+ * 不该用「等更久」掩盖。
+ */
+export async function readTxtWindow(
+  absPath: string,
+  offset: number,
+  length: number | null,
+  encoding: string | null
+): Promise<TxtWindow> {
+  return getPythonBridge().request<TxtWindow>('parse.txt.read', {
+    path: absPath,
+    offset,
+    length,
+    encoding: encoding ?? 'utf-8'
+  })
 }
 
 const ESCAPES: Record<string, string> = {
@@ -61,16 +61,7 @@ export function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (ch) => ESCAPES[ch] as string)
 }
 
-/**
- * 纯文本 → 段落 HTML。
- *
- * 两个细节：
- *   - **空行不产出空段落**：中文 TXT 里段落之间普遍隔一个空行，照搬成 `<p></p>`
- *     会把段距撑成两倍。每段缩进交给 CSS（text-indent），所以先 trim。
- *   - **首行若等于章标题则丢掉**：`chapters.offset` 指向标题行本身（M1-04 的产出），
- *     而 DTO 已经把标题单独给出去了。不丢的话阅读器会出现两行一模一样的标题。
- *     只在「与标题完全相同」时丢，所以「无章节标记的书」那种首章=全文的情况不受影响。
- */
+/** 纯文本 → 段落 HTML（`titleToStrip` 见文件头第 2 条） */
 export function textToHtml(text: string, titleToStrip: string | null = null): string {
   const paragraphs = text
     .split(/\r?\n/)
@@ -78,40 +69,4 @@ export function textToHtml(text: string, titleToStrip: string | null = null): st
     .filter((line) => line.length > 0)
   if (titleToStrip && paragraphs[0] === titleToStrip.trim()) paragraphs.shift()
   return paragraphs.map((line) => `<p>${escapeHtml(line)}</p>`).join('')
-}
-
-/**
- * 读一章的正文。
- *
- * `offset` / `length` 都来自 `chapters` 表；`length` 为 null 表示「读到文件末尾」
- * （只有 EPUB 会这样，TXT 不会，但保留这个语义免得将来漏判）。
- * 读到文件尾就截断，不抛错——目录与文件对不上时，宁可给出能看的内容。
- */
-export async function readTxtChapter(
-  absPath: string,
-  offset: number,
-  length: number | null,
-  encoding: string | null,
-  titleToStrip: string | null = null
-): Promise<string> {
-  const fh = await open(absPath, 'r')
-  try {
-    const { size } = await fh.stat()
-    const start = Math.min(Math.max(0, offset), size)
-    const end = length === null ? size : Math.min(size, start + Math.max(0, length))
-    const wanted = end - start
-    if (wanted <= 0) return ''
-
-    const buffer = Buffer.alloc(wanted)
-    let filled = 0
-    while (filled < wanted) {
-      const { bytesRead } = await fh.read(buffer, filled, wanted - filled, start + filled)
-      if (bytesRead === 0) break
-      filled += bytesRead
-    }
-    const text = decodeBytes(filled === wanted ? buffer : buffer.subarray(0, filled), encoding)
-    return textToHtml(text, titleToStrip)
-  } finally {
-    await fh.close()
-  }
 }

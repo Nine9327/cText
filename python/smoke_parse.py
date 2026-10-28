@@ -29,12 +29,14 @@ for _stream in (sys.stdout, sys.stderr):
         pass
 
 from rpc import WorkerError  # noqa: E402
+from textenc import SAMPLE_SIZE, detect_from_bytes  # noqa: E402
 from methods.parse_txt import (  # noqa: E402
     classify_heading,
     meta_from_filename,
     parse_detect,
     parse_meta,
     parse_txt_outline,
+    parse_txt_read,
 )
 
 # ---------------------------------------------------------------- 语料
@@ -306,6 +308,86 @@ def run_detect_and_errors(tmp: str) -> None:
     )
 
 
+def run_detect_boundary() -> None:
+    """M2-02 回归：样本恰好切在汉字中间时，仍然要认成 UTF-8。
+
+    真实的 SAMPLE_SIZE 是固定的 16KB，而中文是 3 字节一个字——切在字符中间是
+    常态。用严格解码判定会让整本书被判成 GB18030（实测：20MB 的 UTF-8 中文
+    被误判，正文全是乱码）。
+    """
+    line = "这是一行没有章节标记的正文，用于验证截断边界。\n"
+    data = (line.encode("utf-8") * 400)[:SAMPLE_SIZE]
+    check(
+        "样本末尾被截断仍认 UTF-8",
+        detect_from_bytes(data) == "utf-8",
+        f"len={len(data)} tail={data[-3:]!r} → {detect_from_bytes(data)}",
+    )
+
+    # 真正的 GBK 字节不能被这个宽松判定带偏
+    gbk = ("少年李三从山中走出，背着一把破旧的铁剑。\n" * 300).encode("gb18030")[:SAMPLE_SIZE]
+    check("GBK 样本不会被误认成 UTF-8", detect_from_bytes(gbk) != "utf-8", detect_from_bytes(gbk))
+
+
+def run_read(tmp: str) -> None:
+    """M2-02：按字节区间读正文（含窗口截断与半个字符的边界处理）。"""
+    # 正文行不能以「第N章」开头：那会被行首正则当成新章标题
+    lines = ["作者：某甲", "第1章 甲", "这里是第一章的正文。", "第2章 乙", "这里是第二章的正文。"]
+    path = write_bytes(os.path.join(tmp, "read_utf8.txt"), ("\n".join(lines) + "\n").encode("utf-8"))
+    toc = parse_txt_outline({"path": path, "encoding": "auto"})
+    # 按标题找，不按下标猜：目录里可能有「首章之前」的伪章节（作者/简介行）
+    chapter = next(c for c in toc["chapters"] if "第2章" in c["title"])
+    got = parse_txt_read(
+        {"path": path, "offset": chapter["offset"], "length": chapter["length"], "encoding": "utf-8"}
+    )
+    check(
+        "区间读只落在本章",
+        "这里是第二章的正文" in got["text"] and "这里是第一章的正文" not in got["text"],
+        repr(got["text"].strip()[:20]),
+    )
+    check("读完整章时 hasMore=false", got["hasMore"] is False and got["eof"] is True, f"{got['hasMore']}/{got['eof']}")
+
+    # 窗口截断：夹在行边界上，不吊半句话
+    big_lines = "".join(f"第{i}行内容比较长一些用于撑开窗口。\n" for i in range(2000))
+    big = write_bytes(os.path.join(tmp, "read_big.txt"), big_lines.encode("utf-8"))
+    first = parse_txt_read({"path": big, "offset": 0, "length": None, "encoding": "utf-8", "maxBytes": 1024})
+    check("超窗返回 hasMore", first["hasMore"] is True, f"consumed={first['bytesConsumed']}")
+    check("单次读取不越过 maxBytes", first["bytesConsumed"] <= 1024, f"{first['bytesConsumed']}B")
+    check("窗口收在行边界（结尾是换行）", first["text"].endswith("\n"), repr(first["text"][-3:]))
+
+    # 多字节边界：1000 不是 3 的整数倍，最后一个汉字必然被切开
+    cn = write_bytes(os.path.join(tmp, "read_cn.txt"), ("汉" * 1000).encode("utf-8"))
+    part = parse_txt_read({"path": cn, "offset": 0, "length": None, "encoding": "utf-8", "maxBytes": 1000})
+    check("半个字符不会变成 U+FFFD", "\ufffd" not in part["text"], repr(part["text"][-2:]))
+    check(
+        "consumed 与解出的字节数一致",
+        len(part["text"].encode("utf-8")) == part["bytesConsumed"],
+        f"text={len(part['text'].encode('utf-8'))}B consumed={part['bytesConsumed']}B",
+    )
+
+    # 分窗续读拼回原文（700 字节一窗，故意不对齐字符）
+    text_all = ""
+    offset = 0
+    window_calls = 0
+    while window_calls < 20:
+        piece = parse_txt_read({"path": cn, "offset": offset, "length": None, "encoding": "utf-8", "maxBytes": 700})
+        text_all += piece["text"]
+        offset += piece["bytesConsumed"]
+        window_calls += 1
+        if not piece["hasMore"]:
+            break
+    check("分窗续读拼回原文（不丢字不重复）", text_all == "汉" * 1000, f"{len(text_all)} 字 / {window_calls} 窗")
+
+    # 宽字符编码：0x0A 可能是码元的一部分，不能按 b"\n" 切
+    u16 = write_bytes(os.path.join(tmp, "read_u16.txt"), "第一行\n第二行\n".encode("utf-16-le"))
+    got16 = parse_txt_read({"path": u16, "offset": 0, "length": None, "encoding": "utf-16-le"})
+    check("UTF-16 区间读正确", "第二行" in got16["text"], repr(got16["text"].strip()[:10]))
+
+    tail = parse_txt_read({"path": path, "offset": os.path.getsize(path), "length": None, "encoding": "utf-8"})
+    check("文件末尾读出空文本", tail["text"] == "" and tail["eof"] is True, repr(tail["text"]))
+
+    expect_error("缺 path 的读取被拒", "E_INVALID_ARGUMENT", lambda: parse_txt_read({}))
+
+
 def run_performance(tmp: str) -> None:
     """200 章 × 50 段的大文件，确认识别与耗时都在可接受范围。"""
     import time
@@ -336,6 +418,8 @@ def main() -> int:
         run_outline(tmp)
         run_meta(tmp)
         run_detect_and_errors(tmp)
+        run_detect_boundary()
+        run_read(tmp)
         run_performance(tmp)
     except Exception as err:  # noqa: BLE001
         import traceback

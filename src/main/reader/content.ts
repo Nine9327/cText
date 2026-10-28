@@ -17,7 +17,7 @@ import { AppError, ERROR_CODES } from '@shared/errors'
 import type { Db } from '../db/connection'
 import { createLogger } from '../log'
 import { locateBook } from './paths'
-import { readTxtChapter } from './txt'
+import { readTxtWindow, textToHtml } from './txt'
 
 const log = createLogger('reader')
 
@@ -97,14 +97,16 @@ async function loadChapter(
     throw new AppError(ERROR_CODES.notImplemented, 'EPUB 正文渲染尚未实现')
   }
 
-  const html = await readTxtChapter(book.absPath, Number(row.anchor ?? 0), row.length, book.encoding, row.title)
+  const window = await readTxtWindow(book.absPath, Number(row.anchor ?? 0), row.length, book.encoding)
   const content: ChapterContentDTO = {
     bookId: book.id,
     chapterIdx: row.idx,
     title: row.title,
-    html,
+    html: textToHtml(window.text, row.title),
     hasPrev: row.has_prev === 1,
-    hasNext: row.has_next === 1
+    hasNext: row.has_next === 1,
+    // 只有超出窗口的病态章节才带这个标记，正常章节不写（保持 DTO 干净）
+    ...(window.hasMore ? { truncated: true } : {})
   }
   cacheSet(key, content)
 
