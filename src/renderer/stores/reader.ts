@@ -95,6 +95,8 @@ export const useReaderStore = defineStore('reader', () => {
   const customText = ref<string | null>(null)
   const fontFamily = ref<string>('system')
   const mode = ref<ReaderModeSetting>('auto')
+  /** 是否记住阅读位置（M2-08）。关掉时不读也不写进度 */
+  const rememberProgress = ref(true)
   /** 设置是否已从主进程读回来：没读到之前不要把默认值写回库（会覆盖用户设置） */
   const loaded = ref(false)
 
@@ -148,6 +150,7 @@ export const useReaderStore = defineStore('reader', () => {
     customText.value = reader.customText
     fontFamily.value = reader.fontFamily
     mode.value = reader.mode
+    rememberProgress.value = reader.rememberProgress
   }
 
   // ---------------------------------------------------------------- 写设置
@@ -241,6 +244,12 @@ export const useReaderStore = defineStore('reader', () => {
     patchReader({ fontFamily: next }, true)
   }
 
+  function setRememberProgress(value: boolean): void {
+    if (value === rememberProgress.value) return
+    rememberProgress.value = value
+    patchReader({ rememberProgress: value }, true)
+  }
+
   function setMode(next: ReaderMode): void {
     if (next === mode.value) return
     mode.value = next
@@ -288,6 +297,8 @@ export const useReaderStore = defineStore('reader', () => {
     customText,
     fontFamily,
     mode,
+    rememberProgress,
+    setRememberProgress,
     loaded,
     load,
     apply,

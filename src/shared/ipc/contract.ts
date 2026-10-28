@@ -101,6 +101,8 @@ export type IpcMap = {
   /** 整本目录（M2-06）。一次全给：千章也就几十 KB，分页反而让抽屉要处理「加载中」 */
   'reader:chapters': { input: { bookId: string }; output: ChapterDTO[] }
   'reader:saveProgress': { input: ProgressDTO; output: void }
+  /** 读进度（M2-08）。没读过返回 null，由渲染层决定从第 0 章开始 */
+  'reader:progress': { input: { bookId: string }; output: ProgressDTO | null }
 
   // 书源
   'source:import': { input: { json: string } | { filePath: string }; output: SourceImportResultDTO }

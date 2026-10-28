@@ -34,6 +34,7 @@ import { runReaderSmoke } from './reader/smoke'
 import { runReaderBigSmoke } from './reader/big-smoke'
 import { runReaderUiSmoke } from './reader/ui-smoke'
 import { runSettingsSmoke } from './settings/smoke'
+import { runProgressSmoke } from './reader/progress-smoke'
 import { runM1Smoke } from './milestone/m1-smoke'
 import { runImportUiSmoke } from './ui/import-ui-smoke'
 import {
@@ -369,6 +370,16 @@ if (!gotLock) {
     // M1-10 自检：搜索（FTS 前缀命中 / 索引同步 / 200ms 防抖 / 离线标注）
     if (!app.isPackaged && mainWindow && process.env['CTEXT_SEARCH_SMOKE'] === '1') {
       await runSearchSmoke(mainWindow)
+      return
+    }
+
+    // M2-08 自检：进度（写 → 强杀 → 重开恢复，由 verify-progress.mjs 分两段进程驱动）
+    if (!app.isPackaged && mainWindow && process.env['CTEXT_PROGRESS_SMOKE'] === '1') {
+      await runProgressSmoke(
+        mainWindow,
+        process.env['CTEXT_PROGRESS_DIR'] ?? '',
+        process.env['CTEXT_PROGRESS_PHASE'] === 'read' ? 'read' : 'write'
+      )
       return
     }
 

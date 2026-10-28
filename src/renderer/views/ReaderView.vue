@@ -23,7 +23,7 @@ import SettingsPanel from '@/components/reader/SettingsPanel.vue'
 import type { IconName } from '@/components/common/icons'
 import { call } from '@/api'
 import { ERROR_CODES } from '@shared/errors'
-import type { BookDetailDTO, ChapterContentDTO, ChapterDTO } from '@shared/dto'
+import type { BookDetailDTO, ChapterContentDTO, ChapterDTO, ProgressDTO } from '@shared/dto'
 import type { PageSnapshot } from '@/reader/paginate'
 import type { ScrollSnapshot } from '@/reader/scroll'
 import { useReaderStore, type ReaderMode } from '@/stores/reader'
@@ -153,6 +153,7 @@ async function loadBook(): Promise<boolean> {
 async function loadChapter(idx: number, offset = 0): Promise<void> {
   if (idx < 0) return
   if (book.value && idx >= book.value.chapterCount) return
+  cancelSave()
   pending.value = true
   chapterError.value = null
   try {
@@ -194,6 +195,62 @@ function goChapter(idx: number, atEnd = false): void {
   if (idx < 0) return
   if (book.value && idx >= book.value.chapterCount) return
   void loadChapter(idx, atEnd ? -1 : 0)
+}
+
+// ---------------------------------------------------------------- 进度（M2-08）
+
+/**
+ * 1s 防抖落库。
+ *
+ * 为什么不是「每翻一页就写」：连续翻页是常态，一次翻十页就是十次 SQL + 十次
+ * JSON 序列化；而读者真正需要的是「停下来之后位置是准的」。1s 也是产品文档
+ * §2.6 的口径。
+ *
+ * 为什么不在 `beforeunload` 里兜底保存：**强杀进程不会触发它**。所以位置
+ * 必须在「读者停下来的 1s 内」就已经落库，退出时的 flush 只是正常关闭的补充。
+ */
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+let pendingSave: ProgressDTO | null = null
+
+function currentProgress(): ProgressDTO | null {
+  if (!chapter.value || !book.value) return null
+  const total = position.value.total
+  const within = total > 0 ? Math.min(1, position.value.offset / total) : 0
+  const chapters = Math.max(1, book.value.chapterCount)
+  return {
+    bookId: bookId.value,
+    chapterIdx: chapterIdx.value,
+    offset: position.value.offset,
+    percent: Math.min(1, (chapterIdx.value + within) / chapters)
+  }
+}
+
+function scheduleSave(): void {
+  if (!reader.rememberProgress) return
+  pendingSave = currentProgress()
+  if (saveTimer !== null) clearTimeout(saveTimer)
+  saveTimer = setTimeout(flushProgress, 1000)
+}
+
+/** 立即写一次（离开阅读器 / 正常关闭窗口时） */
+function flushProgress(): void {
+  if (saveTimer !== null) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
+  const progress = pendingSave
+  pendingSave = null
+  if (!progress) return
+  void call('reader:saveProgress', progress).catch(() => undefined)
+}
+
+/** 换章/换书时丢掉待写进度：新章的 idx 配旧章的偏移会写出一条错得离谱的记录 */
+function cancelSave(): void {
+  if (saveTimer !== null) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
+  pendingSave = null
 }
 
 // ---------------------------------------------------------------- 目录（M2-06）
@@ -251,10 +308,12 @@ function turn(direction: 1 | -1, unit: 'page' | 'line' = 'page'): void {
 function onPageChange(next: PageSnapshot): void {
   snapshot.value = next
   position.value = { offset: next.offset, total: next.total }
+  scheduleSave()
 }
 
 function onScrollProgress(next: ScrollSnapshot): void {
   position.value = { offset: next.offset, total: next.total }
+  scheduleSave()
 }
 
 /**
@@ -346,12 +405,31 @@ onMounted(async () => {
     }
     return
   }
+  // 恢复优先级：URL 里的章号（目录跳转/分享链接）> 上次读到的位置 > 第 1 章
   const fromQuery = Number(route.query['chapter'] ?? 0)
-  await loadChapter(Number.isFinite(fromQuery) && fromQuery > 0 ? fromQuery : 0)
+  if (Number.isFinite(fromQuery) && fromQuery > 0) {
+    await loadChapter(fromQuery)
+    return
+  }
+
+  const saved = reader.rememberProgress ? await call('reader:progress', { bookId: bookId.value }).catch(() => null) : null
+  if (saved && saved.chapterIdx < (book.value?.chapterCount ?? 0)) {
+    await loadChapter(saved.chapterIdx, saved.offset)
+    return
+  }
+  await loadChapter(0)
 })
+
+function onBeforeUnload(): void {
+  flushProgress()
+}
+
+onMounted(() => window.addEventListener('beforeunload', onBeforeUnload))
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('beforeunload', onBeforeUnload)
+  flushProgress()
   themeQuery?.removeEventListener('change', onSystemTheme)
   themeQuery = null
 })

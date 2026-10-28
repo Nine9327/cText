@@ -93,6 +93,13 @@ export const ipcSchemas = {
     chapterIdx: z.number().int().min(0).max(1_000_000)
   }),
   'reader:chapters': z.object({ bookId: idSchema }),
+  'reader:progress': z.object({ bookId: idSchema }),
+  'reader:saveProgress': z.object({
+    bookId: idSchema,
+    chapterIdx: z.number().int().min(0).max(1_000_000),
+    offset: z.number().int().min(0).max(100_000_000),
+    percent: z.number().min(0).max(1)
+  }),
 
   // 设置（M2-07）。分区用 `.strict()`：键名写错要当场报错，
   // 而不是「保存成功但什么都没变」——后者在设置页上极难查。
