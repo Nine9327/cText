@@ -91,7 +91,10 @@ export async function runReaderUiSmoke(win: BrowserWindow, dir: string): Promise
   const row = getDb()
     .prepare('SELECT id, chapter_count AS chapters FROM books WHERE rel_path = ? AND deleted_at IS NULL')
     .get('分页样本.txt') as { id: string; chapters: number } | undefined
-  check('样本导入成功（3 章 / 前两章各 3300 字）', phase === 'done' && row?.chapters === 3, `${phase} 章数 ${row?.chapters} / ${file}`)
+  const epub = getDb()
+    .prepare('SELECT id, chapter_count AS chapters FROM books WHERE rel_path = ? AND deleted_at IS NULL')
+    .get('toc_volume.epub') as { id: string; chapters: number } | undefined
+  check('样本导入成功（3 章 TXT + 1 本 EPUB）', phase === 'done' && row?.chapters === 3 && !!epub, `${phase} 章数 ${row?.chapters} / epub ${epub?.chapters ?? '缺'} / ${file}`)
   if (!row) {
     emit(checks)
     return
@@ -247,6 +250,92 @@ export async function runReaderUiSmoke(win: BrowserWindow, dir: string): Promise
     `样本 ${samples.join(' / ')} ms，中位 ${median}ms`
   )
 
+  // ---------------------------------------------------------------- 阅读模式（M2-05）
+  // 先看 EPUB 的默认模式：此刻用户还没手动选过（store 里 mode = null），
+  // 默认值只由格式决定，一旦点过切换就再也测不到这个分支了
+  if (epub) {
+    await run(win, `location.hash = '#/reader/${epub.id}'; return true`)
+    const epubState = await waitUntil(async () => {
+      const state = (await run(win, `
+        const root = q('[data-reader]')
+        const content = q('[data-scroll-content]')
+        const text = content ? content.textContent.trim() : ''
+        return JSON.stringify({
+          mode: root ? root.dataset.readerMode : '',
+          rendered: text.length,
+          hasBody: text.includes('正文')
+        })
+      `)) as string
+      const parsed = JSON.parse(state) as { mode: string; rendered: number; hasBody: boolean }
+      return parsed.mode === 'scroll' && parsed.hasBody ? parsed : null
+    }, 10_000)
+    check(
+      'EPUB 默认以滚动模式打开且渲染出正文',
+      epubState?.mode === 'scroll' && epubState.hasBody === true,
+      epubState ? `mode=${epubState.mode} 正文 ${epubState.rendered} 字` : '10s 内没进滚动模式'
+    )
+
+    await run(win, `location.hash = '#/reader/${row.id}'; return true`)
+    await waitUntil(async () => ((await stateOf(win)) as SnapshotState | null), 10_000)
+  }
+
+  const beforeSwitch = await stateOf(win)
+  const restoreMode = (await run(win, `return q('[data-reader]').dataset.readerMode`)) as string
+  check('TXT 默认分页模式', restoreMode === 'paged', restoreMode)
+
+  await run(win, `q('[data-mode="scroll"]').click(); await sleep(400); return true`)
+  const inScroll = await scrollStateOf(win)
+  check(
+    '切到滚动：视图换成滚动容器，且顶部字符就是刚才的页首字符',
+    inScroll.mode === 'scroll' && Math.abs(inScroll.offset - beforeSwitch.offset) <= 2,
+    `mode=${inScroll.mode} 滚动顶部 ${inScroll.offset} / 分页页首 ${beforeSwitch.offset}`
+  )
+
+  if (shot) writeFileSync(shot.replace(/\.png$/i, '-scroll.png'), (await win.capturePage()).toPNG())
+
+  // 单行 + 整屏两种滚动都要能走（↑/↓ 与 PgDn 的步长不同）
+  await run(win, `
+    for (let i = 0; i < 10; i += 1) {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+      await sleep(40)
+    }
+    return true
+  `)
+  await sleep(200)
+  const byLine = await scrollStateOf(win)
+  await run(win, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'PageDown', bubbles: true })); return true`)
+  await sleep(250)
+  const byPage = await scrollStateOf(win)
+  check(
+    '滚动模式：↓ 单行走、PgDn 整屏走',
+    byLine.offset > inScroll.offset && byPage.offset > byLine.offset && byPage.scrollTop > byLine.scrollTop,
+    `顶部字符 ${inScroll.offset} → ${byLine.offset}（↓×10）→ ${byPage.offset}（PgDn）`
+  )
+
+  const anchor = byPage.offset
+  await run(win, `q('[data-mode="paged"]').click(); await sleep(400); return true`)
+  const backToPaged = await stateOf(win)
+  const mapped = JSON.parse(
+    (await run(win, `
+      const probe = window.__ctextReader
+      const page = probe.snapshot().page
+      return JSON.stringify({ page, pageStart: probe.offsetAtPage(page), anchorPage: probe.pageOfOffset(${anchor}) })
+    `)) as string
+  ) as { page: number; pageStart: number; anchorPage: number }
+  check(
+    '切回分页：落在包含该字符的那一页（不是回到第 1 页）',
+    mapped.anchorPage === backToPaged.page && mapped.pageStart <= anchor && backToPaged.page > 0,
+    `滚动顶部 ${anchor} → 第 ${mapped.anchorPage + 1}/${backToPaged.pages} 页（页首 ${mapped.pageStart}）`
+  )
+
+  await run(win, `q('[data-mode="scroll"]').click(); await sleep(400); return true`)
+  const backToScroll = await scrollStateOf(win)
+  check(
+    '再切回滚动：顶部字符与切走时一致',
+    Math.abs(backToScroll.offset - anchor) <= 2,
+    `锚点 ${anchor} → 顶部 ${backToScroll.offset}`
+  )
+
   // ---------------------------------------------------------------- 退出
   await run(win, `window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await sleep(200); return true`)
   const hash = (await run(win, 'return location.hash')) as string
@@ -303,6 +392,20 @@ async function stateOf(win: BrowserWindow): Promise<SnapshotState> {
       fontSize: content ? getComputedStyle(content).fontSize : ''
     } : null
   `)) as SnapshotState
+}
+
+/** 滚动模式的状态：模式标记、顶部字符偏移、scrollTop */
+async function scrollStateOf(win: BrowserWindow): Promise<{ mode: string; offset: number; scrollTop: number }> {
+  const raw = (await run(win, `
+    const root = q('[data-reader]')
+    const probe = window.__ctextScroll
+    return JSON.stringify({
+      mode: root ? root.dataset.readerMode : '',
+      offset: probe ? probe.offsetAtTop() : -1,
+      scrollTop: probe ? probe.scrollTop() : -1
+    })
+  `)) as string
+  return JSON.parse(raw) as { mode: string; offset: number; scrollTop: number }
 }
 
 /** 按一次键并等重排/换章落定 */

@@ -194,7 +194,7 @@ function installProbe(): void {
   <div ref="viewport" class="ct-page-viewport" data-page-viewport>
     <div
       ref="content"
-      class="ct-page-content"
+      class="ct-page-content ct-reader-content"
       data-page-content
       :data-page="snapshot.page"
       :data-pages="snapshot.pages"
@@ -216,6 +216,10 @@ function installProbe(): void {
   overflow: hidden;
 }
 
+/*
+ * 多列容器。正文排版（段落/标题/图片）在 styles/reader-content.css 里，
+ * 两种阅读模式共用；这里只管「怎么分列」。
+ */
 .ct-page-content {
   height: 100%;
   /*
@@ -224,72 +228,7 @@ function installProbe(): void {
    * auto 才是「先填满第一列，再往右开新列」。
    */
   column-fill: auto;
-  text-align: justify;
-  word-break: break-word;
   /* 翻页是位移，交给合成层；不加这条时快速连按会看到一帧的旧位置 */
   will-change: transform;
-}
-
-/* 正文排版：v-html 插进来的元素没有 scoped 属性，必须 :deep 才能命中 */
-.ct-page-content :deep(p) {
-  margin: 0 0 var(--ct-para-gap, 0.7em);
-  text-indent: 2em;
-}
-
-.ct-page-content :deep(h1),
-.ct-page-content :deep(h2),
-.ct-page-content :deep(h3),
-.ct-page-content :deep(h4) {
-  margin: 0.6em 0 0.5em;
-  font-weight: 600;
-  line-height: 1.5;
-  text-indent: 0;
-}
-
-.ct-page-content :deep(h1) {
-  font-size: 1.24em;
-}
-
-.ct-page-content :deep(h2) {
-  font-size: 1.12em;
-}
-
-.ct-page-content :deep(blockquote) {
-  margin: 0.6em 0;
-  padding-left: 0.8em;
-  border-left: 2px solid currentColor;
-  opacity: 0.8;
-}
-
-.ct-page-content :deep(ul),
-.ct-page-content :deep(ol) {
-  margin: 0 0 var(--ct-para-gap, 0.7em);
-  padding-left: 1.6em;
-}
-
-.ct-page-content :deep(li) {
-  margin: 0.2em 0;
-}
-
-/* 图片不能高过一页：否则会溢出列高，把后面所有页的分页全部挤错 */
-.ct-page-content :deep(img) {
-  display: block;
-  max-width: 100%;
-  max-height: calc(var(--ct-page-height, 600px) - 2em);
-  margin: 0.5em auto;
-  object-fit: contain;
-}
-
-.ct-page-content :deep(table) {
-  width: 100%;
-  margin: 0.5em 0;
-  border-collapse: collapse;
-}
-
-.ct-page-content :deep(td),
-.ct-page-content :deep(th) {
-  padding: 0.25em 0.5em;
-  border: 1px solid currentColor;
-  text-align: left;
 }
 </style>

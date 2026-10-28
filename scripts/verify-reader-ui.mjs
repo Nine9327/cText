@@ -7,13 +7,15 @@
  * 用法：pnpm verify:reader:ui（内部先构建一次 out/）
  */
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const electronBin = join(root, 'node_modules', 'electron', 'dist', 'electron.exe')
+const venvPython =
+  process.platform === 'win32' ? join(root, '.venv', 'Scripts', 'python.exe') : join(root, '.venv', 'bin', 'python')
 
 const cleanEnv = { ...process.env }
 // 宿主 IDE 会预设这两个：前者让 Electron 退化成纯 Node，后者带的 shim 会打噪声日志
@@ -39,6 +41,29 @@ function build() {
     console.error(r.stderr)
     throw new Error(`构建失败，退出码 ${r.status}`)
   }
+}
+
+/**
+ * 样本库里除了自检自己写的 TXT，还要有一本 EPUB：M2-05 的「EPUB 默认滚动」
+ * 只能在「用户还没手动选过模式」时验，而那个分支一旦被跳过就再也测不到。
+ * 复用 M1-05 已验收过的包（`python/smoke_epub.py --emit`），不另造样本。
+ */
+function emitEpub(targetDir) {
+  console.log('[样本] 生成 EPUB ...')
+  const emitDir = join(targetDir, '..', 'epub-emit')
+  mkdirSync(targetDir, { recursive: true })
+  const r = spawnSync(venvPython, [join(root, 'python', 'smoke_epub.py'), '--emit', emitDir], {
+    cwd: root,
+    encoding: 'utf8',
+    env: { ...cleanEnv, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' }
+  })
+  const source = join(emitDir, 'toc_volume.epub')
+  if (!existsSync(source)) {
+    console.error(r.stdout ?? '')
+    console.error(r.stderr ?? '')
+    throw new Error('EPUB 样本未生成')
+  }
+  copyFileSync(source, join(targetDir, 'toc_volume.epub'))
 }
 
 function runSmoke(scratch) {
@@ -85,6 +110,7 @@ function runSmoke(scratch) {
 const scratch = mkdtempSync(join(tmpdir(), 'ctext-reader-ui-'))
 try {
   build()
+  emitEpub(join(scratch, 'library'))
   await runSmoke(scratch)
 } finally {
   rmSync(scratch, { recursive: true, force: true })

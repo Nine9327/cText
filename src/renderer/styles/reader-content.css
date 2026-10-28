@@ -1,0 +1,83 @@
+/**
+ * 阅读器正文排版。分页视图（M2-04）与滚动视图（M2-05）共用同一套规则——
+ * 两种模式必须长得一模一样，否则切模式会有「换了一本书」的错觉。
+ *
+ * 为什么不用组件内的 scoped 样式：正文是 `v-html` 插进来的，没有组件的
+ * scope 属性，两个组件各写一份 `:deep` 规则就等于把排版维护在两处。
+ *
+ * 注意：**这里不写颜色**。背景与文字色属于主题（M2-07），由阅读器页面的
+ * 容器决定，正文只继承 currentColor。
+ */
+
+.ct-reader-content {
+  text-align: justify;
+  /* 长英文/URL 不换行会把列宽撑破，进而让分页的列宽与实际不符 */
+  word-break: break-word;
+}
+
+.ct-reader-content p {
+  margin: 0 0 var(--ct-para-gap, 0.7em);
+  /* 中文小说的段首缩进是排版惯例；缩进只影响首行，不影响分页测量 */
+  text-indent: 2em;
+}
+
+.ct-reader-content h1,
+.ct-reader-content h2,
+.ct-reader-content h3,
+.ct-reader-content h4 {
+  margin: 0.6em 0 0.5em;
+  font-weight: 600;
+  line-height: 1.5;
+  text-indent: 0;
+}
+
+.ct-reader-content h1 {
+  font-size: 1.24em;
+}
+
+.ct-reader-content h2 {
+  font-size: 1.12em;
+}
+
+.ct-reader-content blockquote {
+  margin: 0.6em 0;
+  padding-left: 0.8em;
+  border-left: 2px solid currentColor;
+  opacity: 0.8;
+}
+
+.ct-reader-content ul,
+.ct-reader-content ol {
+  margin: 0 0 var(--ct-para-gap, 0.7em);
+  padding-left: 1.6em;
+}
+
+.ct-reader-content li {
+  margin: 0.2em 0;
+}
+
+/* 图片不能高过一页：否则会溢出列高，把分页整体挤错（滚动模式同样别撑破） */
+.ct-reader-content img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(var(--ct-page-height, 600px) - 2em);
+  margin: 0.5em auto;
+  object-fit: contain;
+}
+
+.ct-reader-content table {
+  width: 100%;
+  margin: 0.5em 0;
+  border-collapse: collapse;
+}
+
+.ct-reader-content td,
+.ct-reader-content th {
+  padding: 0.25em 0.5em;
+  border: 1px solid currentColor;
+  text-align: left;
+}
+
+.ct-reader-content > :first-child {
+  margin-top: 0;
+}

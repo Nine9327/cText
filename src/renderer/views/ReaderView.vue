@@ -2,7 +2,9 @@
 /**
  * 阅读器（M2-04 起）。
  *
- * 这一版只承担「分页阅读」：进书 → 读一章 → 左右翻页 → 跨章 → 退出。
+ * 这一段承担「读一章」：进书 → 分页/滚动两种模式 → 跨章 → 退出。
+ * 两种模式共用同一个「章内字符偏移」作为位置，所以切换模式、改字号之后
+ * 停留位置都不丢（M2-05）。
  * 目录抽屉（M2-06）、排版面板（M2-07）、进度落库（M2-08）、书签（M2-09）、
  * 快捷键表（M2-10）、离线重定位（M2-11）都在后续节点接进来。
  *
@@ -15,21 +17,35 @@ import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '@/components/common/AppIcon.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import PagedView from '@/components/reader/PagedView.vue'
+import ScrollView from '@/components/reader/ScrollView.vue'
 import type { IconName } from '@/components/common/icons'
 import { call } from '@/api'
 import { ERROR_CODES } from '@shared/errors'
 import type { BookDetailDTO, ChapterContentDTO } from '@shared/dto'
 import type { PageSnapshot } from '@/reader/paginate'
-import { FONT_SIZE_MAX, FONT_SIZE_MIN, useReaderStore } from '@/stores/reader'
+import type { ScrollSnapshot } from '@/reader/scroll'
+import { FONT_SIZE_MAX, FONT_SIZE_MIN, useReaderStore, type ReaderMode } from '@/stores/reader'
 
 const route = useRoute()
 const router = useRouter()
 const reader = useReaderStore()
 
+const MODES: { value: ReaderMode; label: string }[] = [
+  { value: 'paged', label: '分页' },
+  { value: 'scroll', label: '滚动' }
+]
+
 const book = ref<BookDetailDTO | null>(null)
 const chapter = ref<ChapterContentDTO | null>(null)
 const chapterIdx = ref(0)
-const startOffset = ref(0)
+/** 进入当前视图时从哪个字符开始（换章是 0，往回翻是 -1=章末，切模式是当前偏移） */
+const entryOffset = ref(0)
+/**
+ * 当前位置 = 章内字符偏移。**两种阅读模式共用这一个量**：
+ * 分页模式给的是「当前页首字符」，滚动模式给的是「顶部可见字符」。
+ */
+const position = ref({ offset: 0, total: 0 })
+/** 分页模式的页码（滚动模式下没有意义） */
 const snapshot = ref<PageSnapshot>({ page: 0, pages: 1, offset: 0, total: 0 })
 /** 章节正文请求在途：用来显示细进度条，但**不清空**已有正文（否则每次翻章都闪白） */
 const pending = ref(false)
@@ -47,14 +63,25 @@ const chapterError = ref<PanelError | null>(null)
 
 const bookId = computed(() => String(route.params['bookId'] ?? ''))
 
+/** 未手动选过时按格式取默认：EPUB 滚动、TXT 分页（产品文档 §2.6） */
+const mode = computed<ReaderMode>(() => reader.modeFor(book.value?.format))
+
+const chapterPercent = computed(() =>
+  position.value.total > 0 ? Math.min(1, position.value.offset / position.value.total) : 0
+)
+
 const percent = computed(() => {
   if (!book.value || !chapter.value) return 0
   const chapters = Math.max(1, book.value.chapterCount)
-  const within = snapshot.value.total > 0 ? snapshot.value.offset / snapshot.value.total : 0
-  return Math.min(1, (chapterIdx.value + within) / chapters)
+  return Math.min(1, (chapterIdx.value + chapterPercent.value) / chapters)
 })
 
-const pageLabel = computed(() => `${snapshot.value.page + 1} / ${snapshot.value.pages}`)
+/** 分页模式显页码，滚动模式显章内百分比——两种模式都要有个「读到哪了」的读数 */
+const pageLabel = computed(() =>
+  mode.value === 'paged'
+    ? `${snapshot.value.page + 1} / ${snapshot.value.pages}`
+    : `${Math.round(chapterPercent.value * 100)}%`
+)
 
 function describe(err: unknown): PanelError {
   const code = (err as { code?: string }).code ?? ''
@@ -114,7 +141,7 @@ async function loadChapter(idx: number, offset = 0): Promise<void> {
   chapterError.value = null
   try {
     const content = await call('reader:content', { bookId: bookId.value, chapterIdx: idx })
-    startOffset.value = offset
+    entryOffset.value = offset
     chapterIdx.value = idx
     chapter.value = content
     // 章节写进 URL：刷新/重启能回到同一章，M2-06 的跳转也只是改这个参数
@@ -137,7 +164,7 @@ async function retry(): Promise<void> {
     chapterError.value = null
     // 离线态先让主进程复核一次根目录：用户刚插回硬盘时，这里应该直接成功
     if (panel?.icon === 'offline') await call('roots:check').catch(() => undefined)
-    await loadChapter(chapterIdx.value, startOffset.value)
+    await loadChapter(chapterIdx.value, entryOffset.value)
   }
 }
 
@@ -153,18 +180,47 @@ function goChapter(idx: number, atEnd = false): void {
   void loadChapter(idx, atEnd ? -1 : 0)
 }
 
-// ---------------------------------------------------------------- 翻页
+// ---------------------------------------------------------------- 翻页 / 滚动
 
 const paged = ref<InstanceType<typeof PagedView> | null>(null)
+const scroller = ref<InstanceType<typeof ScrollView> | null>(null)
 
-function turn(direction: 1 | -1): void {
+/**
+ * 前进/后退一格。
+ *
+ * `unit='page'` 是整屏（←/→、空格、PgUp/PgDn），`unit='line'` 是单行（↑/↓）。
+ * 两种模式的边界处理一样：到头了就换章——但「回头」时落到上一章末页
+ * （`atEnd`），不是第 1 页。
+ */
+function turn(direction: 1 | -1, unit: 'page' | 'line' = 'page'): void {
   if (!chapter.value || chapterError.value) return
-  const result = direction === 1 ? paged.value?.next() : paged.value?.prev()
-  if (result && !result.ok && result.atEdge) goChapter(chapterIdx.value + direction, direction === -1)
+  if (mode.value === 'paged') {
+    const result = direction === 1 ? paged.value?.next() : paged.value?.prev()
+    if (result && !result.ok && result.atEdge) goChapter(chapterIdx.value + direction, direction === -1)
+    return
+  }
+  const result =
+    unit === 'line' ? scroller.value?.scrollLine(direction) : scroller.value?.scrollPage(direction)
+  if (result === 'edge') goChapter(chapterIdx.value + direction, direction === -1)
 }
 
 function onPageChange(next: PageSnapshot): void {
   snapshot.value = next
+  position.value = { offset: next.offset, total: next.total }
+}
+
+function onScrollProgress(next: ScrollSnapshot): void {
+  position.value = { offset: next.offset, total: next.total }
+}
+
+/**
+ * 切模式。**切换前先记下当前字符偏移**，新视图就以它为入口——
+ * 这就是「切模式后停留位置不丢」的全部实现：两个视图认同一个坐标系。
+ */
+function setMode(next: ReaderMode): void {
+  if (mode.value === next) return
+  entryOffset.value = position.value.offset
+  reader.setMode(next)
 }
 
 // ---------------------------------------------------------------- 键盘
@@ -190,6 +246,14 @@ function onKeydown(event: KeyboardEvent): void {
     case 'PageUp':
       event.preventDefault()
       turn(-1)
+      break
+    case 'ArrowDown':
+      event.preventDefault()
+      turn(1, 'line')
+      break
+    case 'ArrowUp':
+      event.preventDefault()
+      turn(-1, 'line')
       break
     case ' ':
       event.preventDefault()
@@ -235,7 +299,7 @@ watch(bookId, async () => {
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col bg-app" data-reader>
+  <div class="flex h-full min-h-0 flex-col bg-app" data-reader :data-reader-mode="mode">
     <!-- 顶栏：返回 / 书名 · 章名 / 页码 / 字号 -->
     <header class="flex h-11 shrink-0 items-center gap-3 border-b border-line px-3">
       <button class="ct-icon-btn" title="返回书库（Esc）" data-reader-back @click="router.push('/library')">
@@ -250,7 +314,22 @@ watch(bookId, async () => {
       </div>
 
       <div class="flex items-center gap-1.5">
-        <span class="min-w-[64px] text-right text-[11.5px] tabular-nums text-faint" data-reader-page>
+        <!-- 模式切换：分页 / 滚动（产品文档 §2.6「与分页模式可切换」） -->
+        <div class="flex items-center rounded-md border border-line p-0.5" data-reader-mode>
+          <button
+            v-for="item in MODES"
+            :key="item.value"
+            class="rounded px-1.5 py-[3px] text-[11px] leading-none transition-colors duration-120"
+            :class="mode === item.value ? 'bg-active text-ink' : 'text-faint hover:text-dim'"
+            :data-mode="item.value"
+            :aria-pressed="mode === item.value"
+            @click="setMode(item.value)"
+          >
+            {{ item.label }}
+          </button>
+        </div>
+
+        <span class="min-w-[52px] text-right text-[11.5px] tabular-nums text-faint" data-reader-page>
           {{ chapter ? pageLabel : '' }}
         </span>
         <button
@@ -285,14 +364,24 @@ watch(bookId, async () => {
           paddingBottom: `${reader.typography.marginY}px`
         }"
       >
+        <!-- 两种模式互斥渲染：key 带上模式，切换时整块重建，位置由 entryOffset 带过去 -->
         <PagedView
-          v-if="chapter"
-          :key="`${bookId}:${chapterIdx}`"
+          v-if="chapter && mode === 'paged'"
+          :key="`paged:${bookId}:${chapterIdx}`"
           ref="paged"
           :html="chapter.html"
           :typography="reader.typography"
-          :start-offset="startOffset"
+          :start-offset="entryOffset"
           @page-change="onPageChange"
+        />
+        <ScrollView
+          v-else-if="chapter"
+          :key="`scroll:${bookId}:${chapterIdx}`"
+          ref="scroller"
+          :html="chapter.html"
+          :typography="reader.typography"
+          :start-offset="entryOffset"
+          @progress="onScrollProgress"
         />
       </div>
 

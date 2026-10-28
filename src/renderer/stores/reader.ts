@@ -10,6 +10,14 @@
  */
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import type { BookFormat } from '@shared/dto'
+
+/**
+ * 阅读模式。`null` 表示「还没手动选过」——此时按书籍格式取默认：
+ * EPUB 默认滚动、TXT 默认分页（产品文档 §2.6）。
+ * 一旦用户点了切换，就用他的选择，不再随格式漂。
+ */
+export type ReaderMode = 'paged' | 'scroll'
 
 export interface ReaderTypography {
   /** px */
@@ -42,6 +50,17 @@ const clamp = (value: number, min: number, max: number): number => Math.min(max,
 
 export const useReaderStore = defineStore('reader', () => {
   const typography = ref<ReaderTypography>({ ...DEFAULTS })
+  /** 用户显式选过的模式；null = 跟随格式 */
+  const mode = ref<ReaderMode | null>(null)
+
+  function setMode(next: ReaderMode): void {
+    mode.value = next
+  }
+
+  /** 当前该用哪种模式。`format` 为 null（书还没加载）时按分页处理 */
+  function modeFor(format: BookFormat | null | undefined): ReaderMode {
+    return mode.value ?? (format === 'epub' ? 'scroll' : 'paged')
+  }
 
   /** 字号步进用 1px：两档之间差 18% 的话，调一次就可能整段重排，反而不好微调 */
   function setFontSize(px: number): void {
@@ -56,5 +75,5 @@ export const useReaderStore = defineStore('reader', () => {
     typography.value = { ...DEFAULTS }
   }
 
-  return { typography, setFontSize, stepFontSize, resetTypography }
+  return { typography, mode, setMode, modeFor, setFontSize, stepFontSize, resetTypography }
 })

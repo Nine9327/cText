@@ -8,6 +8,7 @@ import { router } from './router'
 import { useImportStore } from './stores/import'
 import { useLibraryStore } from './stores/library'
 import './styles/index.css'
+import './styles/reader-content.css'
 
 // M0-06：先装兜底，再 mount。顺序反了的话，挂载期间抛的错就没人接
 installRendererErrorHandlers()
