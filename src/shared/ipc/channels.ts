@@ -48,6 +48,11 @@ export const INVOKE_CHANNELS = defineChannels<IpcChannel>()([
   'books:relocateFile',
   'shelves:get',
 
+  'categories:list',
+  'categories:create',
+  'categories:update',
+  'categories:remove',
+
   'import:pickFolder',
   'import:scan',
   'import:commit',

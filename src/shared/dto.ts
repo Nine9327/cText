@@ -56,6 +56,8 @@ export interface CategoryDTO {
   name: string
   color: string | null
   sort: number
+  /** 该分类下的书籍数（M3-03）。侧栏筛选与统计都要它，别再单开计数通道 */
+  bookCount: number
 }
 
 export interface ShelfRefDTO {

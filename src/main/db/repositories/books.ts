@@ -14,6 +14,7 @@
  */
 import type { BookFormat, BookSort, BookSortField } from '@shared/dto'
 import { getDb, type Db } from '../connection'
+import { categoriesOfBook } from './categories'
 import { ulid } from '../../utils/id'
 
 /** 待写入的章节行（与 DDL 列一一对应） */
@@ -225,6 +226,8 @@ export interface BookListQuery {
   rootId?: string
   favoritesOnly?: boolean
   shelfId?: string
+  /** 题材标签筛选（M3-03）。多个之间是 **OR**：标签的直觉是「沾一个就算」 */
+  categoryIds?: string[]
   /** 标题/作者/简介的全文匹配（FTS5 前缀查询，M1-10） */
   keyword?: string
   /** 缺省 = 导入时间倒序 */
@@ -305,6 +308,11 @@ export function listBooks(db: Db, query: BookListQuery): { items: import('@share
     conditions.push('books.id IN (SELECT book_id FROM shelf_books WHERE shelf_id = ?)')
     params.push(query.shelfId)
   }
+  if (query.categoryIds && query.categoryIds.length > 0) {
+    const slots = query.categoryIds.map(() => '?').join(',')
+    conditions.push(`books.id IN (SELECT book_id FROM book_categories WHERE category_id IN (${slots}))`)
+    params.push(...query.categoryIds)
+  }
   if (query.keyword) {
     const match = toFtsQuery(query.keyword)
     if (match) {
@@ -344,7 +352,7 @@ export function recentBooks(db: Db, rootId: string | undefined, limit: number): 
 
 export function countBooks(
   db: Db,
-  query: { rootId?: string; favoritesOnly?: boolean }
+  query: { rootId?: string; favoritesOnly?: boolean; categoryIds?: string[] }
 ): number {
   const conditions: string[] = []
   const params: unknown[] = []
@@ -353,6 +361,11 @@ export function countBooks(
     params.push(query.rootId)
   }
   if (query.favoritesOnly) conditions.push('favorite = 1')
+  if (query.categoryIds && query.categoryIds.length > 0) {
+    const slots = query.categoryIds.map(() => '?').join(',')
+    conditions.push(`id IN (SELECT book_id FROM book_categories WHERE category_id IN (${slots}))`)
+    params.push(...query.categoryIds)
+  }
   const where = conditions.length > 0 ? ` AND ${conditions.join(' AND ')}` : ''
   return asCount(db.prepare(`SELECT COUNT(*) AS n FROM books WHERE deleted_at IS NULL${where}`).get(...params) as {
     n: number
@@ -432,13 +445,8 @@ export function getBookDetail(db: Db, id: string): import('@shared/dto').BookDet
     | undefined
   if (!row) return null
 
-  const categories = db
-    .prepare(
-      `SELECT c.id, c.name, c.color, c.sort
-       FROM book_categories bc JOIN categories c ON c.id = bc.category_id
-       WHERE bc.book_id = ? ORDER BY c.sort, c.name`
-    )
-    .all(id) as { id: string; name: string; color: string | null; sort: number }[]
+  // 分类与书架都走「归属查询」，与 M3-03 的 categoriesOfBook 同一口径（含计数）
+  const categories = categoriesOfBook(db, id)
 
   const shelves = db
     .prepare(

@@ -62,6 +62,8 @@ export const ipcSchemas = {
     rootId: idSchema.optional(),
     favoritesOnly: z.boolean().optional(),
     shelfId: idSchema.optional(),
+    /** 标签筛选用 OR：上限 32 个（再多就不是筛选而是组合搜索了） */
+    categoryIds: z.array(idSchema).max(32).optional(),
     /** 全文关键字：限长 100（超长输入没有检索意义，只会拖慢 FTS） */
     keyword: z.string().max(100, '搜索词最多 100 字符').optional(),
     /** 字段用 allowlist：ORDER BY 的列名不能来自用户输入 */
@@ -76,7 +78,8 @@ export const ipcSchemas = {
   }),
   'books:count': z.object({
     rootId: idSchema.optional(),
-    favoritesOnly: z.boolean().optional()
+    favoritesOnly: z.boolean().optional(),
+    categoryIds: z.array(idSchema).max(32).optional()
   }),
   'books:relocateFile': z.object({ bookId: idSchema, searchDir: pathSchema }),
   'books:recent': z.object({
@@ -86,6 +89,8 @@ export const ipcSchemas = {
   'library:get': z.object({ id: idSchema }),
   /** 收藏开关（M3-01）：传目标值而不是「切换」，重试幂等 */
   'library:toggleFavorite': z.object({ id: idSchema, value: z.boolean() }),
+  /** 整体替换一本书的分类（M3-03）：传完整列表，空数组 = 清空标签 */
+  'library:setCategories': z.object({ id: idSchema, categoryIds: z.array(idSchema).max(32) }),
 
   'shelves:get': z.object({ shelfId: idSchema }),
   'shelves:list': z.void(),
@@ -108,6 +113,27 @@ export const ipcSchemas = {
     toIndex: z.number().int().min(0).max(100_000)
   }),
   'shelves:reorder': z.object({ shelfIds: z.array(idSchema).max(500) }),
+
+  // 分类（M3-03）。颜色与阅读主题同一口径：#rrggbb 或 null（＝用默认色）
+  'categories:list': z.void(),
+  'categories:create': z.object({
+    name: z.string().trim().min(1, '分类名不能为空').max(20, '分类名最多 20 字'),
+    color: z
+      .string()
+      .regex(/^#[0-9a-fA-F]{6}$/, '颜色要写成 #rrggbb')
+      .nullable()
+  }),
+  'categories:update': z.object({
+    id: idSchema,
+    name: z.string().trim().min(1, '分类名不能为空').max(20, '分类名最多 20 字').optional(),
+    color: z
+      .string()
+      .regex(/^#[0-9a-fA-F]{6}$/, '颜色要写成 #rrggbb')
+      .nullable()
+      .optional(),
+    sort: z.number().int().min(0).max(10_000).optional()
+  }),
+  'categories:remove': z.object({ id: idSchema }),
 
   // 阅读器（M2-01 / 目录 M2-06）
   'reader:content': z.object({

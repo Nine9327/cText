@@ -13,6 +13,7 @@ import { runIpcSmoke } from './ipc/smoke'
 import { registerRootsIpc } from './ipc/roots'
 import { registerBooksIpc } from './ipc/books'
 import { registerShelvesIpc } from './ipc/shelves'
+import { registerCategoriesIpc } from './ipc/categories'
 import { registerReaderIpc } from './ipc/reader'
 import { registerSettingsIpc } from './ipc/settings'
 import { registerBookmarksIpc } from './ipc/bookmarks'
@@ -34,6 +35,7 @@ import { runListSmoke } from './ui/list-smoke'
 import { runSearchSmoke } from './ui/search-smoke'
 import { runFavoriteSmoke } from './ui/favorite-smoke'
 import { runShelfSmoke } from './ui/shelf-smoke'
+import { runCategorySmoke } from './ui/category-smoke'
 import { runReaderSmoke } from './reader/smoke'
 import { runReaderBigSmoke } from './reader/big-smoke'
 import { runReaderUiSmoke } from './reader/ui-smoke'
@@ -285,6 +287,7 @@ if (!gotLock) {
     registerRootsIpc()
     registerBooksIpc()
     registerShelvesIpc()
+    registerCategoriesIpc()
     registerImportIpc()
     registerReaderIpc()
     registerSettingsIpc()
@@ -389,6 +392,12 @@ if (!gotLock) {
     // M3-02 自检：书架（CRUD / 架内顺序 / 拖书入架 / 删除不删书）
     if (!app.isPackaged && mainWindow && process.env['CTEXT_SHELF_SMOKE'] === '1') {
       await runShelfSmoke(mainWindow)
+      return
+    }
+
+    // M3-03 自检：分类（多对多 / 筛选 OR / 与排序叠加 / CRUD）
+    if (!app.isPackaged && mainWindow && process.env['CTEXT_CATEGORY_SMOKE'] === '1') {
+      await runCategorySmoke(mainWindow)
       return
     }
 

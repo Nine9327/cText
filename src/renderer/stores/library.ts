@@ -12,7 +12,7 @@
  */
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import type { BookDTO, BookSort, RootDTO, ShelfDTO } from '@shared/dto'
+import type { BookDTO, BookSort, CategoryDTO, RootDTO, ShelfDTO } from '@shared/dto'
 import { call, on } from '@/api/client'
 
 /** 「全部书库」是渲染层虚拟出来的入口，不对应任何 roots 行 */
@@ -49,6 +49,15 @@ export const useLibraryStore = defineStore('library', () => {
 
   const favCount = ref(0)
   const recent = ref<BookDTO[]>([])
+
+  /**
+   * 分类（M3-03）。
+   *
+   * `categoryFilter` 与 `keyword` 一样是**与域正交**的筛选条件：在书库页勾了
+   * 「科幻」，切到收藏页仍然只科幻——用户的筛选意图跟着人走，而不是跟着页面走。
+   */
+  const categories = ref<CategoryDTO[]>([])
+  const categoryFilter = ref<string[]>([])
 
   const domain = ref<LibraryDomain>({})
 
@@ -217,6 +226,47 @@ export const useLibraryStore = defineStore('library', () => {
     return next
   }
 
+  async function loadCategories(): Promise<void> {
+    categories.value = await call('categories:list')
+    // 分类被删掉之后，筛选里残留的 id 会让列表永远是空的（而且用户看不出原因）
+    if (categoryFilter.value.some((id) => !categories.value.some((item) => item.id === id))) {
+      categoryFilter.value = categoryFilter.value.filter((id) => categories.value.some((item) => item.id === id))
+    }
+  }
+
+  /** 分类筛选（多选 OR）。与排序/搜索各自独立，切换后回到第一页 */
+  function setCategoryFilter(ids: string[]): void {
+    categoryFilter.value = [...ids]
+    void loadPage(0)
+  }
+
+  async function createCategory(name: string, color: string | null): Promise<CategoryDTO> {
+    const category = await call('categories:create', { name, color })
+    await loadCategories()
+    return category
+  }
+
+  async function updateCategory(
+    id: string,
+    patch: { name?: string; color?: string | null }
+  ): Promise<void> {
+    await call('categories:update', { id, ...patch })
+    await loadCategories()
+  }
+
+  async function removeCategory(id: string): Promise<void> {
+    await call('categories:remove', { id })
+    await loadCategories()
+    // 删的正好是筛选条件之一：列表要按新条件重拉，否则停在「0 本」上
+    if (categoryFilter.value.includes(id)) void loadPage(0)
+  }
+
+  async function reorderCategories(ids: string[]): Promise<void> {
+    // 逐个写 sort：分类数量以十计，一次 IPC 一个比新开批量通道划算
+    await Promise.all(ids.map((id, index) => call('categories:update', { id, sort: index })))
+    await loadCategories()
+  }
+
   async function loadPage(offset: number): Promise<void> {
     loading.value = true
     loadError.value = null
@@ -227,6 +277,8 @@ export const useLibraryStore = defineStore('library', () => {
         ...scope(),
         sort: { field: sort.value.field, direction: sort.value.direction },
         keyword: keyword.value || undefined,
+        // 数组要脱代理：Vue 的 Proxy 过不了结构化克隆（见 M1-09 的坑）
+        categoryIds: categoryFilter.value.length > 0 ? [...categoryFilter.value] : undefined,
         offset,
         limit: PAGE_SIZE
       })
@@ -249,7 +301,7 @@ export const useLibraryStore = defineStore('library', () => {
 
   /** 域切换 / 数据变更后的整表重置 */
   async function reload(): Promise<void> {
-    await Promise.all([loadRoots(), loadShelves(), loadFavCount(), loadRecent()])
+    await Promise.all([loadRoots(), loadShelves(), loadFavCount(), loadRecent(), loadCategories()])
     await loadPage(0)
   }
 
@@ -341,6 +393,8 @@ export const useLibraryStore = defineStore('library', () => {
     loadError,
     favCount,
     recent,
+    categories,
+    categoryFilter,
     pageSize: PAGE_SIZE,
     loadMore,
     reload,
@@ -358,6 +412,12 @@ export const useLibraryStore = defineStore('library', () => {
     removeFromShelf,
     moveBookInShelf,
     reorderShelves,
+    loadCategories,
+    setCategoryFilter,
+    createCategory,
+    updateCategory,
+    removeCategory,
+    reorderCategories,
     rootCount,
     bindEvents
   }

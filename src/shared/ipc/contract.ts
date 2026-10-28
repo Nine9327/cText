@@ -16,6 +16,7 @@ import type {
   BookDetailDTO,
   BookQuery,
   BookSort,
+  CategoryDTO,
   ChapterContentDTO,
   ChapterDTO,
   EchoRequest,
@@ -80,12 +81,23 @@ export type IpcMap = {
   'shelves:reorder': { input: { shelfIds: string[] }; output: void }
   'shelves:get': { input: { shelfId: string }; output: ShelfDTO | null }
 
+  // 分类（M3-03）。名称唯一；设置某本书的分类是**整体替换**
+  'categories:list': { input: void; output: CategoryDTO[] }
+  'categories:create': { input: { name: string; color: string | null }; output: CategoryDTO }
+  'categories:update': {
+    input: { id: string; name?: string; color?: string | null; sort?: number }
+    output: CategoryDTO | null
+  }
+  'categories:remove': { input: { id: string }; output: void }
+
   // 书籍列表（M1-08，排序由 M1-09 扩展）
   'books:list': {
     input: {
       rootId?: string
       favoritesOnly?: boolean
       shelfId?: string
+      /** 题材标签筛选（M3-03），多个之间是 OR */
+      categoryIds?: string[]
       /** 标题/作者/简介的 FTS5 前缀匹配（M1-10） */
       keyword?: string
       /** 缺省 = 导入时间倒序 */
@@ -95,7 +107,10 @@ export type IpcMap = {
     }
     output: Paged<BookDTO>
   }
-  'books:count': { input: { rootId?: string; favoritesOnly?: boolean }; output: { total: number } }
+  'books:count': {
+    input: { rootId?: string; favoritesOnly?: boolean; categoryIds?: string[] }
+    output: { total: number }
+  }
   'books:recent': { input: { rootId?: string; limit?: number }; output: BookDTO[] }
   /**
    * 文件重定位（M2-11）：在 `searchDir` 下按文件名找唯一匹配，改写 rel_path。

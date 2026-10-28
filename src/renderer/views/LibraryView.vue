@@ -20,6 +20,8 @@ import AppIcon from '@/components/common/AppIcon.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import SegmentedControl from '@/components/common/SegmentedControl.vue'
 import SortMenu from '@/components/library/SortMenu.vue'
+import CategoryFilter from '@/components/library/CategoryFilter.vue'
+import CategoryManager from '@/components/library/CategoryManager.vue'
 import BookCard from '@/components/book/BookCard.vue'
 import { pushToast } from '@/lib/toast'
 import { BOOK_MIME, getDragSource } from '@/lib/drag'
@@ -102,6 +104,8 @@ async function onCardDrop(event: DragEvent, toIndex: number, target: BookDTO): P
 }
 
 const viewMode = ref<'grid' | 'detail' | 'list'>('grid')
+/** 分类管理弹窗（M3-03）。筛选与 CRUD 分两个控件：一个管「看哪些」，一个管「有哪些」 */
+const managingCategories = ref(false)
 
 /**
  * 搜索输入（M1-10）。**200ms 防抖在视图层**：store 只接受终值并重拉第一页，
@@ -176,6 +180,17 @@ const emptyState = computed(() => {
       icon: 'search' as const,
       title: '没有找到匹配的书籍',
       desc: `书名、作者或简介里都没有「${library.keyword}」。搜索按前缀匹配，可以少打几个字试试。`
+    }
+  }
+  if (library.categoryFilter.length > 0) {
+    const names = library.categories
+      .filter((item) => library.categoryFilter.includes(item.id))
+      .map((item) => item.name)
+      .join('、')
+    return {
+      icon: 'layers' as const,
+      title: '这个分类下没有书籍',
+      desc: `当前筛选中：${names || '（已失效的分类）'}。清除筛选即可回到全部书籍。`
     }
   }
   if (isFavorites.value) {
@@ -370,10 +385,14 @@ watch(
       </div>
 
       <!-- 工具栏 -->
-      <div v-if="library.booksTotal > 0" class="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div
+        v-if="library.booksTotal > 0 || library.categoryFilter.length > 0"
+        class="mb-4 flex flex-wrap items-center justify-between gap-3"
+      >
         <SegmentedControl v-model="viewMode" :options="viewOptions" />
 
         <div class="flex items-center gap-2">
+          <CategoryFilter @manage="managingCategories = true" />
           <SortMenu :shelf="isShelf" />
 
           <div class="flex">
@@ -473,6 +492,15 @@ watch(
         >
           清除搜索
         </button>
+        <button
+          v-else-if="library.categoryFilter.length > 0 && !shelfMissing"
+          type="button"
+          class="ct-btn"
+          data-category-reset
+          @click="library.setCategoryFilter([])"
+        >
+          清除分类筛选
+        </button>
         <RouterLink v-else-if="shelfMissing" to="/shelves" class="ct-btn">返回书架列表</RouterLink>
         <button
           v-else-if="!isFavorites && !isShelf"
@@ -486,5 +514,7 @@ watch(
         </button>
       </EmptyState>
     </div>
+
+    <CategoryManager :open="managingCategories" @close="managingCategories = false" />
   </div>
 </template>

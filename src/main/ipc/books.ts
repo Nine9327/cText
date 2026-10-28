@@ -43,17 +43,26 @@ export function registerBooksIpc(): void {
     relocateBookFile(getDb(), bookId, searchDir)
   )
 
-  registerHandler('books:list', ({ rootId, favoritesOnly, shelfId, keyword, sort, offset, limit }) => {
+  registerHandler('books:list', ({ rootId, favoritesOnly, shelfId, categoryIds, keyword, sort, offset, limit }) => {
     if (process.env['CTEXT_SEARCH_SMOKE'] === '1' && keyword) {
       keywordCalls.push({ keyword, at: Date.now() })
     }
-    const { items, total } = listBooks(getDb(), { rootId, favoritesOnly, shelfId, keyword, sort, offset, limit })
+    const { items, total } = listBooks(getDb(), {
+      rootId,
+      favoritesOnly,
+      shelfId,
+      categoryIds,
+      keyword,
+      sort,
+      offset,
+      limit
+    })
     const paged: Paged<BookDTO> = { items, total, offset, limit }
     return paged
   })
 
-  registerHandler('books:count', ({ rootId, favoritesOnly }) => ({
-    total: countBooks(getDb(), { rootId, favoritesOnly })
+  registerHandler('books:count', ({ rootId, favoritesOnly, categoryIds }) => ({
+    total: countBooks(getDb(), { rootId, favoritesOnly, categoryIds })
   }))
 
   registerHandler('books:recent', ({ rootId, limit }) => recentBooks(getDb(), rootId, limit ?? 3))
