@@ -37,7 +37,8 @@
     "verify:import": "node scripts/verify-import.mjs",
     "verify:import:ui": "node scripts/verify-import-ui.mjs",
     "verify:list": "node scripts/verify-list.mjs",
-    "verify:search": "node scripts/verify-search.mjs"
+    "verify:search": "node scripts/verify-search.mjs",
+    "verify:m1": "node scripts/verify-m1.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

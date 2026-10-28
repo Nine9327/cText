@@ -27,6 +27,7 @@ import { runUiSmoke } from './ui/smoke'
 import { seedUiFixture } from './ui/ui-fixture'
 import { runListSmoke } from './ui/list-smoke'
 import { runSearchSmoke } from './ui/search-smoke'
+import { runM1Smoke } from './milestone/m1-smoke'
 import { runImportUiSmoke } from './ui/import-ui-smoke'
 import {
   applyStartupSwitches,
@@ -354,6 +355,12 @@ if (!gotLock) {
     // M1-10 自检：搜索（FTS 前缀命中 / 索引同步 / 200ms 防抖 / 离线标注）
     if (!app.isPackaged && mainWindow && process.env['CTEXT_SEARCH_SMOKE'] === '1') {
       await runSearchSmoke(mainWindow)
+      return
+    }
+
+    // M1 出口验收：500 本一键导入 / 拔盘保留 / 插回恢复（万级列表由 verify:list 覆盖）
+    if (!app.isPackaged && process.env['CTEXT_M1_SMOKE'] === '1') {
+      await runM1Smoke()
       return
     }
 

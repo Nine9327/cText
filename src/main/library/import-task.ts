@@ -582,14 +582,16 @@ async function runTask(
       async (entry) => {
         task.currentPath = entry.file.relPath
         try {
-          buffer.push({
-            book: await prepareBook(entry, {
-              rootId: target.rootId,
-              coversDir: runtime.coversDir,
-              timeoutMs: runtime.timeoutMs ?? PARSE_TIMEOUT_MS
-            }),
-            entry
+          // **await 必须在 push 之外**。写成 `buffer.push({ book: await prepareBook(...) })`
+          // 时，`buffer.push` 的接收者在 await 之前就被求值成当时的那个数组；等待期间
+          // 别的 worker 可能触发 flush 把 `buffer` 换成新数组，恢复后这一本就被推进
+          // 已丢弃的旧数组——表现为「500 本只入库了 473 本，且 failed/skipped 都是 0」。
+          const book = await prepareBook(entry, {
+            rootId: target.rootId,
+            coversDir: runtime.coversDir,
+            timeoutMs: runtime.timeoutMs ?? PARSE_TIMEOUT_MS
           })
+          buffer.push({ book, entry })
           if (buffer.length >= batchSize) flush()
         } catch (err) {
           recordFailure(task, entry.file.relPath, err)
