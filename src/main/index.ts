@@ -26,6 +26,7 @@ import { runPackageSmoke } from './package/smoke'
 import { runUiSmoke } from './ui/smoke'
 import { seedUiFixture } from './ui/ui-fixture'
 import { runListSmoke } from './ui/list-smoke'
+import { runSearchSmoke } from './ui/search-smoke'
 import { runImportUiSmoke } from './ui/import-ui-smoke'
 import {
   applyStartupSwitches,
@@ -347,6 +348,12 @@ if (!gotLock) {
     // M1-08 自检：1 万本压测（接口 P95 / 虚拟 DOM 有界 / 滚动帧率 / 触底分页）
     if (!app.isPackaged && mainWindow && process.env['CTEXT_LIST_SMOKE'] === '1') {
       await runListSmoke(mainWindow)
+      return
+    }
+
+    // M1-10 自检：搜索（FTS 前缀命中 / 索引同步 / 200ms 防抖 / 离线标注）
+    if (!app.isPackaged && mainWindow && process.env['CTEXT_SEARCH_SMOKE'] === '1') {
+      await runSearchSmoke(mainWindow)
       return
     }
 

@@ -77,6 +77,8 @@ export type IpcMap = {
       rootId?: string
       favoritesOnly?: boolean
       shelfId?: string
+      /** 标题/作者/简介的 FTS5 前缀匹配（M1-10） */
+      keyword?: string
       /** 缺省 = 导入时间倒序 */
       sort?: BookSort
       offset: number

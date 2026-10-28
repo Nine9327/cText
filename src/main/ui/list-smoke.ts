@@ -203,6 +203,22 @@ function runSortChecks(): Check[] {
     detail: `mass=${inRoot.total} ghost=${noRoot.total}`
   })
 
+  // ⑤ 关键词搜索（M1-10）：'压测书籍' 命中全部 1 万本，是 FTS 子查询 + 排序 + 分页的最坏情况
+  const searchSamples: number[] = []
+  let searchTotal = -1
+  for (let i = 0; i < 10; i += 1) {
+    const t0 = performance.now()
+    const page = listBooks(db, { keyword: '压测书籍', offset: 0, limit: 120 })
+    searchSamples.push(performance.now() - t0)
+    searchTotal = page.total
+  }
+  const searchP95 = p95(searchSamples)
+  checks.push({
+    name: '关键词搜索（命中 1 万）P95 < 30ms',
+    ok: searchP95 < 30 && searchTotal === TOTAL,
+    detail: `p95=${searchP95}ms total=${searchTotal}`
+  })
+
   return checks
 }
 

@@ -32,6 +32,31 @@ const imports = useImportStore()
 
 const viewMode = ref<'grid' | 'detail' | 'list'>('grid')
 
+/**
+ * 搜索输入（M1-10）。**200ms 防抖在视图层**：store 只接受终值并重拉第一页，
+ * 这样「切关键字」和「切根目录」走同一条 loadPage(0) 路径，不会有两套刷新逻辑。
+ * 清空是即时生效的（不等防抖）——用户点 × 就是要立刻回到全量列表。
+ */
+const searchText = ref(library.keyword)
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+
+function onSearchInput(): void {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    searchTimer = null
+    library.setKeyword(searchText.value)
+  }, 200)
+}
+
+function clearSearch(): void {
+  if (searchTimer) {
+    clearTimeout(searchTimer)
+    searchTimer = null
+  }
+  searchText.value = ''
+  library.setKeyword('')
+}
+
 const viewOptions = [
   { value: 'grid', label: '封面', icon: 'grid' as const },
   { value: 'detail', label: '详细', icon: 'detail' as const },
@@ -68,12 +93,19 @@ const title = computed(() => {
   return (route.meta.title as string) ?? '全部书籍'
 })
 
-/** 最近阅读只在书库首页出现；根目录离线时会没有可读的书，此时整段隐藏 */
-const showRecent = computed(() => route.name === 'library' && library.recent.length > 0)
+/** 最近阅读只在书库首页出现；搜索时整段隐藏（在搜索上下文里没有意义） */
+const showRecent = computed(() => route.name === 'library' && !library.keyword && library.recent.length > 0)
 
 const emptyState = computed(() => {
   if (shelfMissing.value) {
     return { icon: 'folder' as const, title: '书架不存在', desc: '这个书架可能已被删除，或链接里的编号不对。' }
+  }
+  if (library.keyword) {
+    return {
+      icon: 'search' as const,
+      title: '没有找到匹配的书籍',
+      desc: `书名、作者或简介里都没有「${library.keyword}」。搜索按前缀匹配，可以少打几个字试试。`
+    }
   }
   if (isFavorites.value) {
     return {
@@ -176,6 +208,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   resizeObserver = null
+  if (searchTimer) clearTimeout(searchTimer)
 })
 
 // 视图切换后行几何全部变化，等一帧 DOM 更新完再测量
@@ -200,10 +233,24 @@ watch(
       <div class="relative mx-auto w-full max-w-[520px]">
         <AppIcon name="search" :size="14" class="absolute left-3 top-1/2 -translate-y-1/2 text-faint" />
         <input
+          v-model="searchText"
           type="text"
           placeholder="搜索书籍..."
-          class="w-full rounded-lg border border-line bg-elevated py-[7px] pl-9 pr-3 text-[13px] text-ink placeholder:text-faint focus:border-line-strong focus:outline-none"
+          class="w-full rounded-lg border border-line bg-elevated py-[7px] pl-9 pr-8 text-[13px] text-ink placeholder:text-faint focus:border-line-strong focus:outline-none"
+          data-search-input
+          @input="onSearchInput"
         />
+        <button
+          v-if="searchText"
+          type="button"
+          class="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-faint transition-colors duration-120 hover:bg-hover hover:text-ink"
+          title="清除搜索"
+          aria-label="清除搜索"
+          data-search-clear
+          @click="clearSearch"
+        >
+          <AppIcon name="close" :size="12" />
+        </button>
       </div>
       <span class="absolute right-6 text-[11.5px] text-faint" data-book-count>{{ library.booksTotal }} 本</span>
     </div>
@@ -330,7 +377,16 @@ watch(
         :title="emptyState.title"
         :desc="emptyState.desc"
       >
-        <RouterLink v-if="shelfMissing" to="/shelves" class="ct-btn">返回书架列表</RouterLink>
+        <button
+          v-if="library.keyword && !shelfMissing"
+          type="button"
+          class="ct-btn"
+          data-search-reset
+          @click="clearSearch"
+        >
+          清除搜索
+        </button>
+        <RouterLink v-else-if="shelfMissing" to="/shelves" class="ct-btn">返回书架列表</RouterLink>
         <button
           v-else-if="!isFavorites && !isShelf"
           type="button"

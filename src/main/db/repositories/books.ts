@@ -225,6 +225,8 @@ export interface BookListQuery {
   rootId?: string
   favoritesOnly?: boolean
   shelfId?: string
+  /** 标题/作者/简介的全文匹配（FTS5 前缀查询，M1-10） */
+  keyword?: string
   /** 缺省 = 导入时间倒序 */
   sort?: BookSort
   offset: number
@@ -255,6 +257,27 @@ function orderByClause(sort: BookSort | undefined): string {
   return `${ORDER_BY[field]} ${direction}, books.id ${direction}`
 }
 
+/**
+ * 用户输入 → FTS5 查询串（M1-10）。
+ *
+ * 两条硬要求：
+ *   1. **不能把输入原样塞进 MATCH**。FTS5 查询语法里 `" * ( ) : ^ -` 都有含义，
+ *      用户搜一个孤立引号就能让整条 SQL 报 "unterminated string"——表现为列表空白 +
+ *      内部错误，而用户只是打错了一个字符。这里把语法字符当分隔符扔掉。
+ *   2. **每个词补 `*` 前缀**。unicode61 把连续汉字当成一个 token，只有前缀匹配才能命中
+ *      「三体」「万历」这类书名开头；中间词（「经济」之于「中国政府与经济发展」）本版
+ *      不命中——这是分词器口径，换 trigram 才能解，而 trigram 对 2 字词直接失效
+ *      （中文书名两字太常见，代价不可接受）。产品文档 §2.10 的口径同样是「前缀匹配」。
+ */
+export function toFtsQuery(raw: string): string {
+  const tokens = raw
+    .replace(/["*()^:+-]/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 8)
+  return tokens.map((token) => `"${token}"*`).join(' AND ')
+}
+
 export function listBooks(db: Db, query: BookListQuery): { items: import('@shared/dto').BookDTO[]; total: number } {
   const conditions: string[] = []
   const params: unknown[] = []
@@ -268,6 +291,15 @@ export function listBooks(db: Db, query: BookListQuery): { items: import('@share
   if (query.shelfId) {
     conditions.push('books.id IN (SELECT book_id FROM shelf_books WHERE shelf_id = ?)')
     params.push(query.shelfId)
+  }
+  if (query.keyword) {
+    const match = toFtsQuery(query.keyword)
+    if (match) {
+      // 子查询而不是 join：books_fts 是外部内容表，join 时 MATCH 只能写在 ON/FROM 上，
+      // 而 IN 子查询对 count 与 list 两条 SQL 一模一样（count 那条没有 join library_roots）
+      conditions.push('books.rowid IN (SELECT rowid FROM books_fts WHERE books_fts MATCH ?)')
+      params.push(match)
+    }
   }
   const where = conditions.length > 0 ? ` AND ${conditions.join(' AND ')}` : ''
 

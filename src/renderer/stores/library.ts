@@ -53,6 +53,13 @@ export const useLibraryStore = defineStore('library', () => {
   const domain = ref<LibraryDomain>({})
 
   /**
+   * 搜索关键字（M1-10）。与域正交：在「收藏」页也能搜，换根目录时关键字保留
+   * （用户搜到一半切书库，不该把输入清掉）。防抖在视图层做，这里只负责
+   * 「接受终值并重拉第一页」。
+   */
+  const keyword = ref('')
+
+  /**
    * 排序偏好（M1-09）。5 种排序跨三个入口共享一份——在书架页选了「书名」，
    * 回到书库页仍是「书名」，这是用户预期的「列表排序」而不是「某页的排序」。
    * 目前只存在内存里（与三视图偏好同批，落 settings 表属 M5）。
@@ -121,6 +128,7 @@ export const useLibraryStore = defineStore('library', () => {
       const page = await call('books:list', {
         ...scope(),
         sort: { field: sort.value.field, direction: sort.value.direction },
+        keyword: keyword.value || undefined,
         offset,
         limit: PAGE_SIZE
       })
@@ -174,6 +182,14 @@ export const useLibraryStore = defineStore('library', () => {
     void reload()
   }
 
+  /** 关键字变化（视图层已做 200ms 防抖）：只重拉列表，与域/计数无关 */
+  function setKeyword(next: string): void {
+    const value = next.trim()
+    if (value === keyword.value) return
+    keyword.value = value
+    void loadPage(0)
+  }
+
   /** 排序切换：只重拉列表，不重建根目录/书架（它们与排序无关） */
   function setSort(next: BookSort): void {
     if (next.field === sort.value.field && next.direction === sort.value.direction) return
@@ -207,6 +223,7 @@ export const useLibraryStore = defineStore('library', () => {
     books,
     booksTotal,
     sort,
+    keyword,
     loading,
     loaded,
     loadError,
@@ -219,6 +236,7 @@ export const useLibraryStore = defineStore('library', () => {
     selectRoot,
     setDomain,
     setSort,
+    setKeyword,
     rootCount,
     bindEvents
   }

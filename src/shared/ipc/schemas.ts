@@ -57,11 +57,13 @@ export const ipcSchemas = {
   'import:commit': z.object({ path: pathSchema, options: importOptionsSchema }),
   'import:cancel': z.object({ taskId: idSchema }),
 
-  // 书籍列表（M1-08，排序 M1-09）
+  // 书籍列表（M1-08，排序 M1-09，搜索 M1-10）
   'books:list': z.object({
     rootId: idSchema.optional(),
     favoritesOnly: z.boolean().optional(),
     shelfId: idSchema.optional(),
+    /** 全文关键字：限长 100（超长输入没有检索意义，只会拖慢 FTS） */
+    keyword: z.string().max(100, '搜索词最多 100 字符').optional(),
     /** 字段用 allowlist：ORDER BY 的列名不能来自用户输入 */
     sort: z
       .object({
