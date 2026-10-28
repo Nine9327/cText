@@ -26,6 +26,7 @@ export const INVOKE_CHANNELS = defineChannels<IpcChannel>()([
   'library:get',
   'library:toggleFavorite',
   'library:update',
+  'library:rematch',
   'library:setCategories',
   'library:remove',
   'library:removeMany',

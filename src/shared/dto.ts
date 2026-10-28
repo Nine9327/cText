@@ -60,6 +60,19 @@ export interface CategoryDTO {
   bookCount: number
 }
 
+/**
+ * 重新识别结果（M3-06）。
+ *
+ * `changed` 是给界面说「变了什么」用的：只说「识别完成」等于什么都没说，
+ * 用户无法判断该不该保留这次结果（失败时库里一个字段都不会变）。
+ */
+export interface RematchResultDTO {
+  changed: string[]
+  before: { title: string; author: string | null; chapterCount: number }
+  after: { title: string; author: string | null; chapterCount: number }
+  book: BookDetailDTO | null
+}
+
 export interface ShelfRefDTO {
   id: string
   name: string

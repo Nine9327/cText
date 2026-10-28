@@ -173,7 +173,8 @@ export async function runBatchSmoke(win: BrowserWindow): Promise<Check[]> {
         q('[data-menu-category-option="ct1"]').click()
         await sleep(600)
 
-        // ⑤ 重新识别（M3-06 未实现，只给提示）
+        // ⑤ 重新识别（M3-06 已实现；fixture 的书没有真实文件 → 必然失败，
+        //    这正是「失败不能静默」的场景：要给可读的原因，且原值不动）
         rightClick(cardOf(out.text.firstId))
         await waitFor(() => q('[data-menu-rematch]'), 4000)
         q('[data-menu-rematch]').click()
@@ -264,7 +265,11 @@ export async function runBatchSmoke(win: BrowserWindow): Promise<Check[]> {
   )
   check('菜单里的收藏立即生效', text['favAfterMenu'] === '1', text['favAfterMenu'] ?? '')
   check('二级列表可用', info['submenuItems']! > 1, `${info['submenuItems']} 行`)
-  check('重新识别给出未实现提示', (text['rematchToast'] ?? '').includes('M3-06'), text['rematchToast'] ?? '')
+  check(
+    '重新识别失败时给出可读提示',
+    (text['rematchToast'] ?? '').includes('重新识别失败'),
+    text['rematchToast'] ?? ''
+  )
   check(
     '移出书库有二次确认且说明文件保留',
     (text['confirmDesc'] ?? '').includes('不会被删除'),

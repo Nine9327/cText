@@ -195,6 +195,38 @@ function openBookmark(bookmark: BookmarkDTO): void {
   void router.push(`/reader/${bookId.value}?chapter=${bookmark.chapterIdx}&offset=${bookmark.offset}`)
 }
 
+/**
+ * 重新识别（M3-06）：按文件重跑元信息与目录。
+ *
+ * 失败时**一个字段都不写**（主进程保证），所以界面上不需要「回退」按钮——
+ * 原值本来就没动。成功时只在 `changed` 非空时才说「变了什么」，
+ * 否则一句「识别完成」等于没说。
+ */
+const rematching = ref(false)
+
+async function rematch(): Promise<void> {
+  if (!book.value || rematching.value) return
+  rematching.value = true
+  try {
+    const result = await call('library:rematch', { id: book.value.id })
+    if (result.book) book.value = result.book
+    chapters.value = await call('reader:chapters', { bookId: book.value.id }).catch(() => [])
+    introDraft.value = book.value?.intro ?? ''
+    library.refresh()
+    pushToast({
+      level: 'info',
+      message: result.changed.length > 0 ? `重新识别完成：${result.changed.join('、')}有更新` : '重新识别完成：没有发现变化'
+    })
+  } catch (err) {
+    pushToast({
+      level: 'error',
+      message: err instanceof Error ? `重新识别失败（原信息未改动）：${err.message}` : '重新识别失败，原信息未改动'
+    })
+  } finally {
+    rematching.value = false
+  }
+}
+
 function openReader(): void {
   void router.push(`/reader/${bookId.value}`)
 }
@@ -332,6 +364,17 @@ const stateText = computed(() => {
               <button type="button" class="ct-btn" data-detail-categories @click="openCategories">
                 <AppIcon name="layers" :size="14" />
                 设置分类
+              </button>
+              <button
+                type="button"
+                class="ct-btn"
+                :disabled="rematching || book.offline"
+                :title="book.offline ? '目录离线时无法重新解析' : '按文件重新解析元信息与目录'"
+                data-detail-rematch
+                @click="rematch"
+              >
+                <AppIcon name="search" :size="14" />
+                {{ rematching ? '识别中…' : '重新识别' }}
               </button>
             </div>
           </div>

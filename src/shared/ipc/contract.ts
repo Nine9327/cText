@@ -25,6 +25,7 @@ import type {
   ImportProgressDTO,
   Paged,
   ProgressDTO,
+  RematchResultDTO,
   RendererLogDTO,
   RootDTO,
   RootsChangedDTO,
@@ -56,6 +57,11 @@ export type IpcMap = {
   'library:get': { input: { id: string }; output: BookDetailDTO | null }
   'library:toggleFavorite': { input: { id: string; value: boolean }; output: void }
   'library:setCategories': { input: { id: string; categoryIds: string[] }; output: void }
+  /**
+   * 重新识别（M3-06）：按磁盘文件重跑元信息与目录解析，覆盖库里的记录。
+   * 失败时不写任何字段；成功时保留进度/收藏/书架/分类。
+   */
+  'library:rematch': { input: { id: string }; output: RematchResultDTO }
   /** 元信息编辑（M3-04）：只给要改的字段，未传的保持原值 */
   'library:update': {
     input: {

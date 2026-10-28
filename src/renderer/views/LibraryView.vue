@@ -26,6 +26,7 @@ import BookContextMenu from '@/components/book/BookContextMenu.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import BookCard from '@/components/book/BookCard.vue'
 import { pushToast } from '@/lib/toast'
+import { call } from '@/api/client'
 import { BOOK_MIME, getDragSource } from '@/lib/drag'
 import { useImportStore } from '@/stores/import'
 import { useLibraryStore } from '@/stores/library'
@@ -309,7 +310,21 @@ async function menuAction(kind: 'read' | 'detail' | 'rematch'): Promise<void> {
   if (!book) return
   if (kind === 'read') return openBook(book)
   if (kind === 'detail') return void router.push(`/book/${book.id}`)
-  pushToast({ level: 'info', message: '重新识别将在 M3-06 提供' })
+
+  // 重新识别（M3-06）：失败时主进程一个字段都不写，这里只需把错误说清楚
+  try {
+    const result = await call('library:rematch', { id: book.id })
+    library.refresh()
+    pushToast({
+      level: 'info',
+      message: result.changed.length > 0 ? `重新识别完成：${result.changed.join('、')}有更新` : '重新识别完成：没有发现变化'
+    })
+  } catch (err) {
+    pushToast({
+      level: 'error',
+      message: err instanceof Error ? `重新识别失败（原信息未改动）：${err.message}` : '重新识别失败，原信息未改动'
+    })
+  }
 }
 
 /**

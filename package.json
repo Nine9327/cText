@@ -49,7 +49,9 @@
     "verify:shelf": "node scripts/verify-shelf.mjs",
     "verify:category": "node scripts/verify-category.mjs",
     "verify:detail": "node scripts/verify-detail.mjs",
-    "verify:batch": "node scripts/verify-batch.mjs"
+    "verify:batch": "node scripts/verify-batch.mjs",
+    "verify:rematch": "node scripts/verify-rematch.mjs",
+    "verify:m3": "node scripts/verify-m3.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

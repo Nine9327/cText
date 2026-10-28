@@ -104,6 +104,8 @@ export const ipcSchemas = {
   /** 单本移除：`deleteFile` 由界面恒传 false，schema 仍允许 true 以免将来加功能时改契约 */
   'library:remove': z.object({ id: idSchema, deleteFile: z.boolean() }),
 
+  'library:rematch': z.object({ id: idSchema }),
+
   /** 元信息编辑（M3-04）。长度上限按「能显示得下」定，不是按数据库能力 */
   'library:update': z.object({
     id: idSchema,

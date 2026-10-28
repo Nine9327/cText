@@ -38,6 +38,7 @@ import { runShelfSmoke } from './ui/shelf-smoke'
 import { runCategorySmoke } from './ui/category-smoke'
 import { runDetailSmoke } from './ui/detail-smoke'
 import { runBatchSmoke } from './ui/batch-smoke'
+import { runRematchSmoke } from './ui/rematch-smoke'
 import { runReaderSmoke } from './reader/smoke'
 import { runReaderBigSmoke } from './reader/big-smoke'
 import { runReaderUiSmoke } from './reader/ui-smoke'
@@ -45,6 +46,7 @@ import { runSettingsSmoke } from './settings/smoke'
 import { runProgressSmoke } from './reader/progress-smoke'
 import { runM1Smoke } from './milestone/m1-smoke'
 import { runM2Smoke } from './milestone/m2-smoke'
+import { runM3Smoke } from './milestone/m3-smoke'
 import { runImportUiSmoke } from './ui/import-ui-smoke'
 import {
   applyStartupSwitches,
@@ -385,6 +387,12 @@ if (!gotLock) {
       return
     }
 
+    // M3 出口验收：三者语义不混淆 / 删除类操作二次确认且不删文件
+    if (!app.isPackaged && mainWindow && process.env['CTEXT_M3_SMOKE'] === '1') {
+      await runM3Smoke(mainWindow, process.env['CTEXT_M3_DIR'] ?? '')
+      return
+    }
+
     // M3-01 自检：收藏（纯标记不改缓存版本号 / 星标 / 侧栏计数 / 收藏页移除）
     if (!app.isPackaged && mainWindow && process.env['CTEXT_FAVORITE_SMOKE'] === '1') {
       await runFavoriteSmoke(mainWindow)
@@ -412,6 +420,12 @@ if (!gotLock) {
     // M3-05 自检：批量与右键菜单（500 本批量 <2s / 七项菜单 / 撤销）
     if (!app.isPackaged && mainWindow && process.env['CTEXT_BATCH_SMOKE'] === '1') {
       await runBatchSmoke(mainWindow)
+      return
+    }
+
+    // M3-06 自检：重新识别（覆盖元信息 / 保留用户数据 / 失败不写库）
+    if (!app.isPackaged && mainWindow && process.env['CTEXT_REMATCH_SMOKE'] === '1') {
+      await runRematchSmoke(mainWindow, process.env['CTEXT_REMATCH_DIR'] ?? '')
       return
     }
 

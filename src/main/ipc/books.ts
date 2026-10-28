@@ -23,6 +23,7 @@ import {
   updateBookMeta
 } from '../db/repositories/books'
 import { relocateBookFile } from '../library/relocate'
+import { rematchBook } from '../library/rematch'
 import { locateBook } from '../reader/paths'
 import { removeBooks, restoreBooks, setFavoriteMany } from '../db/repositories/books'
 import { unlink } from 'node:fs/promises'
@@ -86,6 +87,9 @@ export function registerBooksIpc(): void {
       throw new AppError(ERROR_CODES.notFound, '这本书已不在书库中，请刷新列表')
     }
   })
+  /** 重新识别（M3-06）：解析失败时一个字段都不写，原值完整保留 */
+  registerHandler('library:rematch', ({ id }) => rematchBook(getDb(), id))
+
   /** 元信息编辑（M3-04）：改完回传整份详情，渲染层不用再拉一次 */
   registerHandler('library:update', ({ id, patch }) => {
     if (!updateBookMeta(getDb(), id, patch)) {
