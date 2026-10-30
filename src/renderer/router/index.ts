@@ -2,7 +2,7 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import LibraryView from '@/views/LibraryView.vue'
 import ShelvesView from '@/views/ShelvesView.vue'
 import SourcesView from '@/views/SourcesView.vue'
-import ComingSoonView from '@/views/ComingSoonView.vue'
+import SettingsView from '@/views/SettingsView.vue'
 import ReaderView from '@/views/ReaderView.vue'
 import BookDetailView from '@/views/BookDetailView.vue'
 
@@ -12,10 +12,10 @@ import BookDetailView from '@/views/BookDetailView.vue'
  *   /favorites 收藏的书籍
  *   /shelves   我的书架总览 → /shelves/:shelfId 单个书架
  *   /sources   网络小说总览 → /sources/:sourceId 单个书源
- * 加 /reader、/settings 两个未实现页，空状态由 ComingSoonView 承担。
+ * /settings 是 M5-01 交付的七组设置页（常规/阅读/目录/书源/存储/快捷键/关于）。
  *
- * **侧栏只渲染已实现的入口**（书库/收藏/书架）：/sources 与 /settings 的路由
- * 保留——直接输 URL 仍能到达，但侧栏不再给入口，避免用户点进占位页。
+ * **侧栏只渲染已实现的入口**：目前五个（书库/收藏/书架/网络小说/设置）都已交付，
+ * 占位视图 ComingSoonView 暂时没有路由在用——保留文件，M6 的爬取任务页会复用。
  */
 export const router = createRouter({
   // Electron 用 file:// 加载，hash 模式最省事
@@ -77,12 +77,10 @@ export const router = createRouter({
     {
       path: '/settings',
       name: 'settings',
-      component: ComingSoonView,
+      component: SettingsView,
       meta: {
         title: '设置',
-        desc: '阅读偏好、书库根目录、书源管理、存储与快捷键。',
-        icon: 'settings',
-        task: 'M5-01'
+        desc: '常规、阅读、书库目录、书源、存储、快捷键与关于。'
       }
     },
     { path: '/:pathMatch(.*)*', redirect: '/library' }

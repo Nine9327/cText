@@ -41,7 +41,9 @@ export const DEFAULT_SETTINGS: SettingsDTO = {
     rememberProgress: true
   },
   storage: { coverCacheLimitMb: 512 },
-  sources: { complianceAccepted: false, cacheTtlDays: 7 },
+  // cacheTtlDays 默认 30 天：与产品文档 §2.7「默认保留 30 天」对齐。
+  // §7.6 里记的「文档 30 / 代码 7」不一致由 M4-10 收口，别再改回 7。
+  sources: { complianceAccepted: false, cacheTtlDays: 30 },
   shortcuts: {}
 }
 

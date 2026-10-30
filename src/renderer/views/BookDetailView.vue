@@ -20,6 +20,7 @@ import { pushToast } from '@/lib/toast'
 import { coverGradient } from '@/lib/cover'
 import { useLibraryStore } from '@/stores/library'
 import { call } from '@/api/client'
+import { sourcesApi } from '@/api/sources'
 import type { BookDetailDTO, BookmarkDTO, ChapterDTO } from '@shared/dto'
 
 const route = useRoute()
@@ -231,6 +232,48 @@ function openReader(): void {
   void router.push(`/reader/${bookId.value}`)
 }
 
+// ---------------------------------------------------------------- 网络书（M4-09）
+
+const isNetwork = computed(() => book.value?.sourceType === 'network')
+/** 书源名要在界面上显示；书源被删掉时留空，界面显示「书源已移除」 */
+const sourceName = ref<string | null>(null)
+const refreshingToc = ref(false)
+
+async function loadSourceName(sourceId: string | null): Promise<void> {
+  if (!sourceId) {
+    sourceName.value = null
+    return
+  }
+  try {
+    const list = await sourcesApi.list()
+    sourceName.value = list.find((item) => item.id === sourceId)?.name ?? null
+  } catch {
+    // 读不到书源不该挡住详情页：来源区块退化成「未知书源」
+    sourceName.value = null
+  }
+}
+
+/**
+ * 刷新目录。
+ *
+ * 网络书的目录会变长（连载），而 `chapterCount` 是阅读器翻页与进度百分比的依据，
+ * 所以刷新后要同步重拉目录并把详情行换成新值。
+ */
+async function refreshToc(): Promise<void> {
+  if (!book.value || refreshingToc.value) return
+  refreshingToc.value = true
+  try {
+    const result = await sourcesApi.refreshToc(book.value.id)
+    book.value = (await call('library:get', { id: book.value.id })) ?? book.value
+    chapters.value = await call('reader:chapters', { bookId: book.value.id }).catch(() => [])
+    pushToast({ level: 'info', message: `目录已刷新：共 ${result.total} 章` })
+  } catch (err) {
+    pushToast({ level: 'error', message: err instanceof Error ? err.message : '刷新目录失败' })
+  } finally {
+    refreshingToc.value = false
+  }
+}
+
 // ---------------------------------------------------------------- 加载
 
 async function load(): Promise<void> {
@@ -245,6 +288,7 @@ async function load(): Promise<void> {
     }
     book.value = detail
     introDraft.value = detail.intro ?? ''
+    void loadSourceName(detail.sourceId)
     // 分类/书架选择器要用到这两份列表；深链接直接进详情页时 store 还没加载过
     void library.loadCategories()
     void library.loadShelves()
@@ -391,6 +435,19 @@ const stateText = computed(() => {
                 设置分类
               </button>
               <button
+                v-if="isNetwork"
+                type="button"
+                class="ct-btn"
+                :disabled="refreshingToc"
+                title="重新抓取目录（连载书会变长）"
+                data-detail-refresh-toc
+                @click="refreshToc"
+              >
+                <AppIcon name="globe" :size="14" />
+                {{ refreshingToc ? '刷新中…' : '刷新目录' }}
+              </button>
+              <button
+                v-else
                 type="button"
                 class="ct-btn"
                 :disabled="rematching || book.offline"
@@ -580,32 +637,56 @@ const stateText = computed(() => {
         <section class="mt-6" data-detail-source>
           <h3 class="mb-2 text-[12px] text-dim">来源</h3>
           <dl class="grid grid-cols-1 gap-x-6 gap-y-1 text-[11.5px] sm:grid-cols-2">
-            <div class="flex gap-2 border-b border-line/60 py-1.5">
-              <dt class="w-20 shrink-0 text-faint">书库</dt>
-              <dd class="min-w-0 flex-1 truncate text-ink/85" data-detail-root>
-                {{ book.rootId ? book.rootId : '未归属（根目录已移除）' }}
-              </dd>
-            </div>
-            <div class="flex gap-2 border-b border-line/60 py-1.5">
-              <dt class="w-20 shrink-0 text-faint">相对路径</dt>
-              <dd class="min-w-0 flex-1 truncate font-mono text-[11px] text-ink/85" data-detail-path>{{ book.relPath ?? '—' }}</dd>
-            </div>
-            <div class="flex gap-2 border-b border-line/60 py-1.5">
-              <dt class="w-20 shrink-0 text-faint">大小</dt>
-              <dd class="flex-1 text-ink/85">{{ formatSize(book.sizeBytes) }}</dd>
-            </div>
-            <div class="flex gap-2 border-b border-line/60 py-1.5">
-              <dt class="w-20 shrink-0 text-faint">编码</dt>
-              <dd class="flex-1 text-ink/85">{{ book.encoding ?? `—（${book.format.toUpperCase()} 自带编码）` }}</dd>
-            </div>
-            <div class="flex gap-2 border-b border-line/60 py-1.5">
-              <dt class="w-20 shrink-0 text-faint">字数</dt>
-              <dd class="flex-1 text-ink/85">{{ book.wordCount?.toLocaleString() ?? '—' }}</dd>
-            </div>
-            <div class="flex gap-2 border-b border-line/60 py-1.5">
-              <dt class="w-20 shrink-0 text-faint">导入时间</dt>
-              <dd class="flex-1 text-ink/85">{{ formatDate(book.createdAt) }}</dd>
-            </div>
+            <template v-if="isNetwork">
+              <div class="flex gap-2 border-b border-line/60 py-1.5">
+                <dt class="w-20 shrink-0 text-faint">书源</dt>
+                <dd class="min-w-0 flex-1 truncate text-ink/85" data-detail-source-name>
+                  {{ sourceName ?? '书源已移除（无法刷新目录）' }}
+                </dd>
+              </div>
+              <div class="flex gap-2 border-b border-line/60 py-1.5">
+                <dt class="w-20 shrink-0 text-faint">详情页</dt>
+                <dd class="min-w-0 flex-1 truncate font-mono text-[11px] text-ink/85" data-detail-source-url :title="book.sourceUrl ?? ''">
+                  {{ book.sourceUrl ?? '—' }}
+                </dd>
+              </div>
+              <div class="flex gap-2 border-b border-line/60 py-1.5">
+                <dt class="w-20 shrink-0 text-faint">章节</dt>
+                <dd class="flex-1 text-ink/85">{{ book.chapterCount }} 章</dd>
+              </div>
+              <div class="flex gap-2 border-b border-line/60 py-1.5">
+                <dt class="w-20 shrink-0 text-faint">加入时间</dt>
+                <dd class="flex-1 text-ink/85">{{ formatDate(book.createdAt) }}</dd>
+              </div>
+            </template>
+            <template v-else>
+              <div class="flex gap-2 border-b border-line/60 py-1.5">
+                <dt class="w-20 shrink-0 text-faint">书库</dt>
+                <dd class="min-w-0 flex-1 truncate text-ink/85" data-detail-root>
+                  {{ book.rootId ? book.rootId : '未归属（根目录已移除）' }}
+                </dd>
+              </div>
+              <div class="flex gap-2 border-b border-line/60 py-1.5">
+                <dt class="w-20 shrink-0 text-faint">相对路径</dt>
+                <dd class="min-w-0 flex-1 truncate font-mono text-[11px] text-ink/85" data-detail-path>{{ book.relPath ?? '—' }}</dd>
+              </div>
+              <div class="flex gap-2 border-b border-line/60 py-1.5">
+                <dt class="w-20 shrink-0 text-faint">大小</dt>
+                <dd class="flex-1 text-ink/85">{{ formatSize(book.sizeBytes) }}</dd>
+              </div>
+              <div class="flex gap-2 border-b border-line/60 py-1.5">
+                <dt class="w-20 shrink-0 text-faint">编码</dt>
+                <dd class="flex-1 text-ink/85">{{ book.encoding ?? `—（${book.format.toUpperCase()} 自带编码）` }}</dd>
+              </div>
+              <div class="flex gap-2 border-b border-line/60 py-1.5">
+                <dt class="w-20 shrink-0 text-faint">字数</dt>
+                <dd class="flex-1 text-ink/85">{{ book.wordCount?.toLocaleString() ?? '—' }}</dd>
+              </div>
+              <div class="flex gap-2 border-b border-line/60 py-1.5">
+                <dt class="w-20 shrink-0 text-faint">导入时间</dt>
+                <dd class="flex-1 text-ink/85">{{ formatDate(book.createdAt) }}</dd>
+              </div>
+            </template>
           </dl>
         </section>
       </template>

@@ -22,6 +22,8 @@ import type {
   EchoResponse,
   ImportOptions,
   ImportProgressDTO,
+  NetworkBookAddResultDTO,
+  OpenPathTarget,
   Paged,
   ProgressDTO,
   RematchResultDTO,
@@ -33,8 +35,12 @@ import type {
   SettingsDTO,
   ShelfDTO,
   SourceDTO,
+  SourceCacheStatsDTO,
+  SourceDebugInputDTO,
+  SourceDebugResultDTO,
   SourceImportResultDTO,
   SourceSearchResultDTO,
+  SystemStorageStatsDTO,
   ToastDTO,
   WindowStateDTO,
   WorkerHealthDTO
@@ -46,6 +52,23 @@ export type IpcMap = {
   'system:info': { input: void; output: AppInfoDTO }
   // Python worker 健康状态：返回握手信息 + 进程状态，未就绪时 worker 为 null
   'system:worker-health': { input: void; output: WorkerHealthDTO }
+  /**
+   * 用系统文件管理器打开固定目录（M5-01 设置页）。
+   *
+   * 只接受枚举而不是绝对路径：这个通道最终会走到 `shell.openPath`，
+   * 允许传路径就等于把「用系统默认程序打开任意文件」交给渲染层。
+   */
+  'system:openPath': { input: { target: OpenPathTarget }; output: void }
+  /** 存储用量（M5-01）：封面缓存 + 正文缓存 + 数据/日志路径 */
+  'system:storageStats': { input: void; output: SystemStorageStatsDTO }
+  /**
+   * 清空封面缓存（M5-01）。
+   *
+   * 封面是**可以重新下载的装饰**，所以允许整目录清空；同时把 `books.cover_path`
+   * 置空，否则每张书卡都会先请求一个已经不存在的文件再回退占位封面。
+   * 正文缓存不走这里——它有 `source:clearCache`（按书清、带 TTL）。
+   */
+  'system:clearCovers': { input: void; output: { files: number; bytes: number } }
 
   // 窗口（文档 §3.6 只定义了 window:state 事件，这里补一个读取型通道：
   // 渲染层挂载时先用它取初始状态，避免「先订阅后加载」与「先加载后订阅」的竞态）
@@ -192,16 +215,70 @@ export type IpcMap = {
   /** 导出为 Markdown。`path` 为空时由主进程弹保存框（自动化验收会直接给路径） */
   'bookmarks:export': { input: { bookId: string; path: string | null }; output: { path: string } | null }
 
-  // 书源
-  'source:import': { input: { json: string } | { filePath: string }; output: SourceImportResultDTO }
+  // 书源（M4-07 导入与列表；search / refreshToc 归 M4-08、M4-09）
+  /**
+   * 三种来源走同一条校验管线：粘贴 JSON / 本地文件 / URL 直链。
+   * URL 只收 http(s) 的 JSON·纯文本直链，返回 HTML 的地址会被拒（产品文档 §2.7、决策 D2）。
+   */
+  'source:import': {
+    input: { json: string } | { filePath: string } | { url: string }
+    output: SourceImportResultDTO
+  }
   'source:list': { input: void; output: SourceDTO[] }
   'source:toggle': { input: { id: string; enabled: boolean }; output: void }
+  /** 删除书源：只删规则记录。已加入书架的书籍会失去书源（书籍本身保留，转为不可刷新状态） */
+  'source:remove': { input: { id: string }; output: void }
+  /** 拖动排序后整体提交：一次调用写完全部顺序，避免逐条移动产生中间态 */
+  'source:reorder': { input: { ids: string[] }; output: void }
+  /**
+   * 导出为「阅读 3.0」可识别的 JSON 数组。`ids` 不传则导出全部；
+   * `path` 为空时由主进程弹保存框（自动化验收会直接给路径）。
+   */
+  'source:export': {
+    input: { ids?: string[]; path: string | null }
+    output: { path: string; count: number } | null
+  }
+  /** 打开 `.json` 选择框；用户取消返回 null */
+  'source:pickFile': { input: void; output: { path: string } | null }
   'source:search': { input: { keyword: string; opts: SearchOptions }; output: SourceSearchResultDTO }
+  /**
+   * 加入书架（M4-09）：抓详情 + 目录后写库，返回新书 id。
+   * 同一源同一本书重复调用只刷目录（`reused`），不会产生第二条记录。
+   */
+  'source:addBook': {
+    input: { sourceId: string; bookUrl: string; title?: string }
+    output: NetworkBookAddResultDTO
+  }
   'source:refreshToc': { input: { bookId: string }; output: { total: number } }
+  /** 正文缓存用量（M4-10）：字节数、章节数、过期占比、占用最大的若干本 */
+  'source:cacheStats': { input: void; output: SourceCacheStatsDTO }
+  /**
+   * 清理正文缓存。`bookId` 缺省表示全部。
+   * 只删 `cache/sources` 下的文件——书架、目录、阅读进度一律不动。
+   */
+  'source:clearCache': { input: { bookId?: string }; output: { files: number; bytes: number } }
+  /** 在系统文件管理器里打开缓存根目录 */
+  'source:openCacheDir': { input: void; output: void },
+  /**
+   * 规则调试（M4-11）。只读：跑一次真实抓取并把中间结果原样返回，
+   * 不写书架、目录与缓存——面板不是「试运行加入书架」。
+   */
+  'source:debug': { input: SourceDebugInputDTO; output: SourceDebugResultDTO }
+  /**
+   * 手动解除熔断（M4-12）。只清 `fail_streak / breaker_until / last_failure`，
+   * 不动 `enabled`——用户想恢复的是「可以再试一次」，不是「把这个源打开」。
+   */
+  'source:resetBreaker': { input: { sourceId: string }; output: SourceDTO }
 
   // 设置
   'settings:get': { input: void; output: SettingsDTO }
   'settings:patch': { input: { patch: DeepPartial<SettingsDTO> }; output: SettingsDTO }
+  /**
+   * 恢复全部默认值（M5-01）。清空 `settings` 表后按默认值重写一遍，
+   * 并**同步把需要副作用的部分（登录项）重新应用一次**——只改库不改系统，
+   * 用户会看到「恢复默认后开机自启还在」。
+   */
+  'settings:reset': { input: void; output: SettingsDTO }
 }
 
 /** Main → Renderer 的单向事件（webContents.send） */

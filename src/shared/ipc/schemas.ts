@@ -41,6 +41,9 @@ export const ipcSchemas = {
   'system:echo': echoRequestSchema,
   'system:info': z.void(),
   'system:worker-health': z.void(),
+  'system:openPath': z.object({ target: z.enum(['logs', 'data', 'db', 'covers', 'chapters']) }),
+  'system:storageStats': z.void(),
+  'system:clearCovers': z.void(),
   'window:get-state': z.void(),
 
   // 根目录（M1-01）
@@ -196,9 +199,92 @@ export const ipcSchemas = {
     percent: z.number().min(0).max(1)
   }),
 
+  // 书源（M4-07）
+  /**
+   * 三种输入用 `strict()` + 互斥校验：同时传两种就不知道以哪个为准，
+   * 静默取其一会让「我明明粘贴了却导入了文件」这种问题极难查。
+   * 文本上限 6MB（比 5MB 略宽，留给转义后的膨胀），真正的体积限制在主进程按字节判。
+   */
+  'source:import': z
+    .union([
+      z.object({ json: z.string().max(6 * 1024 * 1024, '内容过大') }).strict(),
+      z.object({ filePath: pathSchema }).strict(),
+      z.object({ url: z.string().min(8).max(2048) }).strict()
+    ])
+    .refine(
+      (value) => {
+        const keys = ['json', 'filePath', 'url'] as const
+        return keys.filter((key) => key in value).length === 1
+      },
+      { message: '必须且只能提供 json / filePath / url 之一' }
+    ),
+  'source:list': z.void(),
+  'source:toggle': z.object({ id: idSchema, enabled: z.boolean() }),
+  'source:remove': z.object({ id: idSchema }),
+  /**
+   * 排序一次性提交全量顺序。上限 1000 条足够（真实书源集合很少超过 300），
+   * 超过这个数量更可能是前端把别的 id 列表传错了。
+   */
+  'source:reorder': z.object({ ids: z.array(idSchema).max(1000, '一次最多重排 1000 条') }),
+  'source:export': z.object({ ids: z.array(idSchema).max(1000).optional(), path: pathSchema.nullable() }),
+  'source:pickFile': z.void(),
+  /**
+   * 搜索：关键词上限 200 字——再长也不是书名，更像是把一段正文粘进来了。
+   * `opts` 允许缺省（界面经常只传关键词），默认值由 zod 补空对象。
+   */
+  'source:search': z.object({
+    keyword: z.string().trim().min(1, '请输入要搜索的书名或作者').max(200, '关键词太长'),
+    opts: z
+      .object({
+        sourceIds: z.array(idSchema).max(200).optional(),
+        page: z.number().int().min(1).max(1000).optional(),
+        timeoutMs: z.number().int().min(500).max(30_000).optional(),
+        mergeSame: z.boolean().optional()
+      })
+      .default({})
+  }),
+
+  /**
+   * 加入书架（M4-09）。`bookUrl` 只收 http(s) 的绝对地址——它来自搜索结果，
+   * 由主进程补全过；相对地址到了这一层说明调用方传错了东西。
+   */
+  'source:addBook': z.object({
+    sourceId: idSchema,
+    bookUrl: z
+      .string()
+      .trim()
+      .min(8)
+      .max(2048)
+      .refine((value) => /^https?:\/\//i.test(value), { message: '详情页地址必须是 http(s) 绝对地址' }),
+    title: z.string().trim().max(200).optional()
+  }),
+  'source:refreshToc': z.object({ bookId: idSchema }),
+  'source:cacheStats': z.void(),
+  /** `bookId` 缺省 = 清理全部；给了就只清那一本 */
+  'source:clearCache': z.object({ bookId: idSchema.optional() }),
+  'source:openCacheDir': z.void(),
+  /**
+   * 规则调试（M4-11）。地址只做长度与非空校验：用户可能填目录页、甚至填一个
+   * 故意写坏的地址来验证「规则不匹配时长什么样」，主进程的 URL 补全会给最终结论。
+   */
+  'source:debug': z.object({
+    sourceId: idSchema,
+    url: z.string().trim().max(2048).optional(),
+    keyword: z.string().trim().max(200).optional(),
+    chapterUrl: z.string().trim().max(2048).optional(),
+    phases: z
+      .array(z.enum(['search', 'info', 'toc', 'content']))
+      .min(1)
+      .max(4)
+      .optional()
+  }),
+
+  'source:resetBreaker': z.object({ sourceId: idSchema }),
+
   // 设置（M2-07）。分区用 `.strict()`：键名写错要当场报错，
   // 而不是「保存成功但什么都没变」——后者在设置页上极难查。
   'settings:get': z.void(),
+  'settings:reset': z.void(),
   'settings:patch': z.object({
     patch: z
       .object({
@@ -235,7 +321,7 @@ export const ipcSchemas = {
           })
           .strict()
           .optional(),
-        storage: z.object({ coverCacheLimitMb: z.number().int().min(64).max(8192) }).strict().optional(),
+        storage: z.object({ coverCacheLimitMb: z.number().int().min(0).max(8192) }).strict().optional(),
         sources: z
           .object({
             complianceAccepted: z.boolean().optional(),

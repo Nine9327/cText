@@ -215,6 +215,46 @@ export async function runShelfSmoke(win: BrowserWindow): Promise<Check[]> {
         await waitFor(() => qa('[data-shelf-card]').length === 2, 6000)
         out.info.shelfCardsAfterDelete = qa('[data-shelf-card]').length
         out.info.shelfItemsAfterDelete = qa('[data-shelf-item]').length
+
+        // ⑧ 书架详情页直接删除整个书架（M3-02 补入口）：删完退回总览，书还在
+        location.hash = '#/shelves/s1'
+        await waitFor(() => q('[data-shelf-delete]'), 8000)
+        out.text.detailTitle = txt(q('[data-page-title]'))
+
+        // ⑨ 批量「移出书架」：只解分组、可撤销（撤销后不保证原顺序，只保证本数回来）
+        await waitFor(() => ids().length === 4, 8000)
+        q('[data-batch-toggle]').click()
+        await waitFor(() => q('[data-batch-unshelf]'), 4000)
+        q('[data-batch-all]').click()
+        await sleep(200)
+        out.text.batchSelected = txt(q('[data-batch-count]'))
+        q('[data-batch-unshelf]').click()
+        await waitFor(() => ids().length === 0, 6000)
+        out.text.batchToast = qa('[data-toast]').map(txt).join(' | ')
+        q('[data-undo-action]').click()
+        await waitFor(() => ids().length === 4, 6000)
+        out.info.afterUndoCount = ids().length
+        q('[data-batch-toggle]').click()
+        await sleep(200)
+
+        // ⑩ 删除整个书架：二次确认 → 退回总览
+        q('[data-shelf-delete]').click()
+        await waitFor(() => q('[data-confirm-dialog]'), 4000)
+        out.text.detailConfirmDesc = txt(q('[data-confirm-dialog]'))
+        q('[data-confirm-ok]').click()
+        await waitFor(() => location.hash === '#/shelves', 6000)
+        out.info.shelfItemsAfterDetailDelete = qa('[data-shelf-item]').length
+        out.text.detailToast = qa('[data-toast]').map(txt).join(' | ')
+
+        // ⑪ 侧栏书架菜单：右键 / 「⋯」都能打开，项是重命名与删除
+        const restShelf = q('[data-shelf-row]')
+        restShelf.querySelector('[data-shelf-more]').click()
+        await waitFor(() => q('[data-shelf-menu]'), 4000)
+        out.text.menuTitle = txt(q('[data-shelf-menu-title]'))
+        out.text.menuItems = qa('[data-shelf-menu] .ct-menu-item').map(txt).join(' | ')
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+        await sleep(150)
+        out.info.menuClosed = q('[data-shelf-menu]') ? 0 : 1
       } catch (err) {
         out.problems.push(String((err && err.message) || err))
       }
@@ -260,6 +300,34 @@ export async function runShelfSmoke(win: BrowserWindow): Promise<Check[]> {
     (text['confirmDesc'] ?? '').slice(0, 60)
   )
   check('删除后侧栏只剩 2 个书架', info['shelfItemsAfterDelete'] === 2, `${info['shelfItemsAfterDelete']} 个`)
+
+  // 书架详情页的删除入口（M3-02 补齐）：站在书架里就能处理这个书架
+  check('书架详情页显示当前书架标题', text['detailTitle'] === '睡前读物', text['detailTitle'] ?? '')
+
+  // 批量移出书架（书架域专用按钮）
+  check('书架页全选后显示已选本数', (text['batchSelected'] ?? '').includes('4'), text['batchSelected'] ?? '')
+  check(
+    '批量移出书架提示文件仍在书库',
+    (text['batchToast'] ?? '').includes('文件仍在书库中'),
+    text['batchToast'] ?? ''
+  )
+  check('撤销批量移出后书回到书架', info['afterUndoCount'] === 4, `${info['afterUndoCount']} 本`)
+  check(
+    '详情页删除同样二次确认且说明不删书',
+    (text['detailConfirmDesc'] ?? '').includes('不会被删除'),
+    (text['detailConfirmDesc'] ?? '').slice(0, 60)
+  )
+  check('详情页删除后侧栏只剩 1 个书架', info['shelfItemsAfterDetailDelete'] === 1, `${info['shelfItemsAfterDetailDelete']} 个`)
+  check(
+    '详情页删除后提示书籍仍在书库',
+    (text['detailToast'] ?? '').includes('仍保留在书库中'),
+    text['detailToast'] ?? ''
+  )
+
+  // 侧栏菜单：重命名 / 删除书架两条路都从这里进
+  check('侧栏「⋯」打开书架菜单', (text['menuTitle'] ?? '').length > 0, text['menuTitle'] ?? '')
+  check('书架菜单含重命名与删除', (text['menuItems'] ?? '').includes('重命名') && (text['menuItems'] ?? '').includes('删除书架'), text['menuItems'] ?? '')
+  check('ESC 关闭书架菜单', info['menuClosed'] === 1, `${info['menuClosed']}`)
 
   // 落库校验：整个流程走完，书籍一本没少
   check('全程书籍一本没少（16 本）', bookTotal() === 16, `${bookTotal()} 本`)

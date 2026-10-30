@@ -1,8 +1,12 @@
 import { app, BrowserWindow, screen, session, shell } from 'electron'
 import { join } from 'node:path'
+import type { GeneralSettingsDTO } from '@shared/dto'
 import { disposePythonBridge, getPythonBridge } from './bridge'
 import { runBridgeSmoke } from './bridge/smoke'
 import { closeDatabase, getDb, initDatabase } from './db/connection'
+import { loadSettings } from './db/repositories/settings'
+import { destroyTray, hasTray, installTrayHandlers, syncTray } from './platform/tray'
+import { applyGeneralSettings, shouldStartHidden } from './settings/apply'
 import { runDbSmoke } from './db/smoke'
 import { installGlobalErrorHandlers, reportFatal } from './errors/install'
 import { createLogger, initLogging, shutdownLogging } from './log'
@@ -17,6 +21,7 @@ import { registerCategoriesIpc } from './ipc/categories'
 import { registerReaderIpc } from './ipc/reader'
 import { registerSettingsIpc } from './ipc/settings'
 import { registerBookmarksIpc } from './ipc/bookmarks'
+import { registerSourcesIpc } from './ipc/sources'
 import { installAssetProtocol, registerAssetScheme } from './protocol/assets'
 import { registerImportIpc } from './ipc/import'
 import { registerSystemIpc } from './ipc/system'
@@ -28,12 +33,28 @@ import { runDedupeSmoke } from './library/dedupe-smoke'
 import { runParseBridgeSmoke } from './library/parse-bridge-smoke'
 import { runEpubSmoke } from './library/epub-smoke'
 import { runImportSmoke } from './library/import-smoke'
+import { runRuleParserSmoke } from './engine/ruleParser-smoke'
+import { runCssSmoke } from './engine/extractors/css-smoke'
+import { runXpathSmoke } from './engine/extractors/xpath-smoke'
+import { runJsonSmoke } from './engine/extractors/json-smoke'
+import { runRegexSmoke } from './engine/extractors/regex-smoke'
+import { runHttpSmoke } from './engine/http/smoke'
+import { runJsSmoke } from './engine/js/smoke'
+import { runSourceSmoke } from './engine/source/smoke'
+import { runSearchSmoke as runSourceSearchSmoke } from './engine/source/search-smoke'
+import { runBookSmoke } from './engine/source/book-smoke'
+import { runCacheSmoke } from './network/cache-smoke'
+import { runDebugSmoke } from './engine/source/debug-smoke'
+import { runCompatSmoke } from './engine/source/compat-smoke'
 import { runPackageSmoke } from './package/smoke'
 import { runUiSmoke } from './ui/smoke'
 import { seedUiFixture } from './ui/ui-fixture'
 import { runListSmoke } from './ui/list-smoke'
 import { runSearchSmoke } from './ui/search-smoke'
 import { runFavoriteSmoke } from './ui/favorite-smoke'
+import { runSourcesUiSmoke } from './ui/sources-smoke'
+import { runSettingsUiSmoke } from './ui/settings-smoke'
+import { runBookUiSmoke } from './ui/book-smoke'
 import { runShelfSmoke } from './ui/shelf-smoke'
 import { runCategorySmoke } from './ui/category-smoke'
 import { runDetailSmoke } from './ui/detail-smoke'
@@ -128,7 +149,38 @@ function applyCsp() {
 
 let mainWindow: BrowserWindow | null = null
 
+/**
+ * 是否正在真正退出（M5-01）。
+ *
+ * `closeAction='tray'` 会拦截 close 事件，托盘菜单的「退出」也必须走 close，
+ * 没有这个标志就会被自己拦下——表现为「点了退出没反应，只是窗口不见了」。
+ */
+let quitting = false
+
+/**
+ * 读常规设置。**任何异常都退回「关窗即退出」**：
+ * close 拦截里抛错会让窗口关不掉，那比设置不生效严重得多。
+ */
+function generalSettings(): GeneralSettingsDTO {
+  try {
+    return loadSettings(getDb()).general
+  } catch {
+    return { autoLaunch: false, minimizeToTray: false, closeAction: 'quit', language: 'zh-CN' }
+  }
+}
+
+function showMainWindow(): void {
+  if (!mainWindow) {
+    createWindow()
+    return
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
 function createWindow() {
+  const startHidden = shouldStartHidden(process.argv)
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -148,7 +200,42 @@ function createWindow() {
     }
   })
 
-  mainWindow.once('ready-to-show', () => mainWindow?.show())
+  // 自启动（`--hidden`）且托盘可用时不弹窗：开机时用户正在做别的事，
+  // 一个自己跳出来的阅读器窗口是打扰。托盘不可用则必须显示，否则窗口没有入口。
+  mainWindow.once('ready-to-show', () => {
+    if (startHidden && hasTray()) {
+      log.info('自启动进入托盘', {})
+      return
+    }
+    mainWindow?.show()
+  })
+
+  /**
+   * 关闭行为（M5-01）。
+   *
+   * `syncTray(true)` 的返回值是「托盘现在真的存在吗」——建不起来时**必须放行 close**：
+   * 拦下一个没有托盘可找回的窗口，等价于让应用变成一个杀不掉的僵尸进程。
+   */
+  mainWindow.on('close', (event) => {
+    if (quitting) return
+    if (generalSettings().closeAction !== 'tray') return
+    if (!syncTray(true)) return
+    event.preventDefault()
+    mainWindow?.hide()
+    log.info('关闭窗口：已隐藏到托盘', {})
+  })
+
+  /**
+   * 最小化到托盘。
+   *
+   * Electron 的 `minimize` 事件不可取消（触发时窗口已经最小化），所以这里用
+   * 「紧接着 hide」实现：任务栏按钮消失，托盘图标还在。恢复靠托盘单击 → show。
+   */
+  mainWindow.on('minimize', () => {
+    if (!generalSettings().minimizeToTray) return
+    if (!syncTray(true)) return
+    mainWindow?.hide()
+  })
 
   // 首帧到达 = 本次启动成功：撤看门狗、清崩溃计数
   mainWindow.webContents.on('did-finish-load', () => markFirstPaint())
@@ -253,6 +340,11 @@ const gotLock = app.requestSingleInstanceLock()
 if (!gotLock) {
   app.quit()
 } else {
+  app.on('before-quit', () => {
+    // 任何来源的退出（托盘菜单、系统关机、Cmd+Q）都要先放开 close 拦截
+    quitting = true
+  })
+
   app.on('second-instance', () => {
     // 窗口若已被销毁，第二实例负责重建；否则还原并聚焦
     if (!mainWindow) {
@@ -296,8 +388,209 @@ if (!gotLock) {
     registerReaderIpc()
     registerSettingsIpc()
     registerBookmarksIpc()
+    registerSourcesIpc()
     installAssetProtocol()
     installIpc()
+
+    // M4-01 自检：书源规则解析器（前缀 / 链式 / && / || / ## / {{}} / @put@get / <js>）。
+    // 纯主进程，不需要窗口与数据库，改解析器时能高频跑
+    if (!app.isPackaged && process.env['CTEXT_RULEPARSER_SMOKE'] === '1') {
+      const checks = runRuleParserSmoke()
+      for (const c of checks) {
+        console.log(`SMOKE RULEPARSER ${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.detail ? ` (${c.detail})` : ''}`)
+      }
+      const failed = checks.filter((c) => !c.ok).length
+      console.log(`SMOKE RULEPARSER SUMMARY ${checks.length - failed}/${checks.length}`)
+      app.exit(failed === 0 ? 0 : 1)
+      return
+    }
+
+    // M4-02 自检：CSS 取值器（Legado 简写 / 取值后缀 / 空白折叠 / 坏选择器）。
+    // 同样纯函数、不碰数据库
+    if (!app.isPackaged && process.env['CTEXT_CSS_SMOKE'] === '1') {
+      const checks = runCssSmoke()
+      for (const c of checks) {
+        console.log(`SMOKE CSS ${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.detail ? ` (${c.detail})` : ''}`)
+      }
+      const failed = checks.filter((c) => !c.ok).length
+      console.log(`SMOKE CSS SUMMARY ${checks.length - failed}/${checks.length}`)
+      app.exit(failed === 0 ? 0 : 1)
+      return
+    }
+
+    // M4-03 自检：XPath 取值器（容错建树 / 元素·属性·文本节点 / 索引 / 坏表达式）
+    if (!app.isPackaged && process.env['CTEXT_XPATH_SMOKE'] === '1') {
+      const checks = runXpathSmoke()
+      for (const c of checks) {
+        console.log(`SMOKE XPATH ${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.detail ? ` (${c.detail})` : ''}`)
+      }
+      const failed = checks.filter((c) => !c.ok).length
+      console.log(`SMOKE XPATH SUMMARY ${checks.length - failed}/${checks.length}`)
+      app.exit(failed === 0 ? 0 : 1)
+      return
+    }
+
+    // M4-03 自检：JSONPath 取值器（通配/递归/切片/过滤/类型转换/坏路径）
+    if (!app.isPackaged && process.env['CTEXT_JSON_SMOKE'] === '1') {
+      const checks = runJsonSmoke()
+      for (const c of checks) {
+        console.log(`SMOKE JSON ${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.detail ? ` (${c.detail})` : ''}`)
+      }
+      const failed = checks.filter((c) => !c.ok).length
+      console.log(`SMOKE JSON SUMMARY ${checks.length - failed}/${checks.length}`)
+      app.exit(failed === 0 ? 0 : 1)
+      return
+    }
+
+    // M4-04 自检：正则取值器（Java→JS 语法翻译 / 第 1 捕获组 / 不兼容标记 / ## 替换）
+    if (!app.isPackaged && process.env['CTEXT_REGEX_SMOKE'] === '1') {
+      const checks = runRegexSmoke()
+      for (const c of checks) {
+        console.log(`SMOKE REGEX ${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.detail ? ` (${c.detail})` : ''}`)
+      }
+      const failed = checks.filter((c) => !c.ok).length
+      console.log(`SMOKE REGEX SUMMARY ${checks.length - failed}/${checks.length}`)
+      app.exit(failed === 0 ? 0 : 1)
+      return
+    }
+
+    // M4-06 自检：HTTP 层（SSRF 判定 / GBK 解码 / 同站节流 / 解压·重定向·超时·体积上限）
+    if (!app.isPackaged && process.env['CTEXT_HTTP_SMOKE'] === '1') {
+      const checks = await runHttpSmoke()
+      for (const c of checks) {
+        console.log(`SMOKE HTTP ${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.detail ? ` (${c.detail})` : ''}`)
+      }
+      const failed = checks.filter((c) => !c.ok).length
+      console.log(`SMOKE HTTP SUMMARY ${checks.length - failed}/${checks.length}`)
+      app.exit(failed === 0 ? 0 : 1)
+      return
+    }
+
+    // M4-05 自检：QuickJS 沙箱（取值归一 / 隔离 / 双限 / java.* / ajax 重放）
+    if (!app.isPackaged && process.env['CTEXT_JS_SMOKE'] === '1') {
+      const checks = await runJsSmoke()
+      for (const c of checks) {
+        console.log(`SMOKE JS ${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.detail ? ` (${c.detail})` : ''}`)
+      }
+      const failed = checks.filter((c) => !c.ok).length
+      console.log(`SMOKE JS SUMMARY ${checks.length - failed}/${checks.length}`)
+      app.exit(failed === 0 ? 0 : 1)
+      return
+    }
+
+    // M4-07 自检：书源导入管线（载荷解析 / 归一 / 兼容判定 / 落库四态）。用临时库，不碰 userData
+    if (!app.isPackaged && process.env['CTEXT_SOURCES_SMOKE'] === '1') {
+      const checks = await runSourceSmoke()
+      for (const c of checks) {
+        console.log(`SMOKE SOURCES ${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.detail ? ` (${c.detail})` : ''}`)
+      }
+      const failed = checks.filter((c) => !c.ok).length
+      console.log(`SMOKE SOURCES SUMMARY ${checks.length - failed}/${checks.length}`)
+      app.exit(failed === 0 ? 0 : 1)
+      return
+    }
+
+    // M4-08 自检：搜索聚合（URL 插值 / 并发池 / 分组 / 同名合并 / 失败清单）。
+    // 起本地服务器当「10 个书源站点」，不建库、不碰 userData
+    if (!app.isPackaged && process.env['CTEXT_SOURCE_SEARCH_SMOKE'] === '1') {
+      const checks = await runSourceSearchSmoke()
+      for (const c of checks) {
+        console.log(`SMOKE SEARCH ${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.detail ? ` (${c.detail})` : ''}`)
+      }
+      const failed = checks.filter((c) => !c.ok).length
+      console.log(`SMOKE SEARCH SUMMARY ${checks.length - failed}/${checks.length}`)
+      app.exit(failed === 0 ? 0 : 1)
+      return
+    }
+
+    // M4-09 自检：阅读链路（详情 / 目录分页 / 正文分页 / 加入书架 / 刷新目录）。
+    // 起本地服务器当书源站点，用临时 SQLite 库，不碰 userData
+    if (!app.isPackaged && process.env['CTEXT_SOURCE_BOOK_SMOKE'] === '1') {
+      const checks = await runBookSmoke()
+      for (const c of checks) {
+        console.log(`SMOKE BOOK ${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.detail ? ` (${c.detail})` : ''}`)
+      }
+      const failed = checks.filter((c) => !c.ok).length
+      console.log(`SMOKE BOOK SUMMARY ${checks.length - failed}/${checks.length}`)
+      app.exit(failed === 0 ? 0 : 1)
+      return
+    }
+
+    // M4-11 自检：规则调试（四段跑通 / 跳过 / 失败归因 / 片段截断 / 只读）
+    if (!app.isPackaged && process.env['CTEXT_SOURCE_DEBUG_SMOKE'] === '1') {
+      const checks = await runDebugSmoke()
+      for (const c of checks) {
+        console.log(`SMOKE DEBUG ${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.detail ? ` (${c.detail})` : ''}`)
+      }
+      const failed = checks.filter((c) => !c.ok).length
+      console.log(`SMOKE DEBUG SUMMARY ${checks.length - failed}/${checks.length}`)
+      app.exit(failed === 0 ? 0 : 1)
+      return
+    }
+
+    // M4-10 自检：正文缓存治理（落盘 / TTL / 断网回退 / 清理 / 封面 / 预取）。
+    // 缓存与封面写临时目录，数据库用临时 SQLite，不碰 userData
+    if (!app.isPackaged && process.env['CTEXT_SOURCE_CACHE_SMOKE'] === '1') {
+      const checks = await runCacheSmoke()
+      for (const c of checks) {
+        console.log(`SMOKE CACHE ${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.detail ? ` (${c.detail})` : ''}`)
+      }
+      const failed = checks.filter((c) => !c.ok).length
+      console.log(`SMOKE CACHE SUMMARY ${checks.length - failed}/${checks.length}`)
+      app.exit(failed === 0 ? 0 : 1)
+      return
+    }
+
+    // M4-12 自检：合成书源基线（20 条源 × 搜索/详情/目录/正文四段，全离线）。
+    // 真实书源样本不进仓库（产品文档 §2.7），用 `pnpm compat:report` 单独跑
+    if (!app.isPackaged && process.env['CTEXT_SOURCE_COMPAT_SMOKE'] === '1') {
+      const checks = await runCompatSmoke()
+      for (const c of checks) {
+        console.log(`SMOKE COMPAT ${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.detail ? ` (${c.detail})` : ''}`)
+      }
+      const failed = checks.filter((c) => !c.ok).length
+      console.log(`SMOKE COMPAT SUMMARY ${checks.length - failed}/${checks.length}`)
+      app.exit(failed === 0 ? 0 : 1)
+      return
+    }
+
+    /*
+     * M4-12 真实书源抽样（**不进 CI**，由 `pnpm compat:report --dir <目录>` 触发）。
+     *
+     * 样本路径由使用者传入，程序只读不复制：仓库里没有任何真实书源，
+     * 报告也只出现书名/域名与失败归因。合成基线走 `CTEXT_SOURCE_COMPAT_SMOKE`。
+     */
+    if (!app.isPackaged && process.env['CTEXT_COMPAT_REPORT_DIR'] !== undefined) {
+      const dir = process.env['CTEXT_COMPAT_REPORT_DIR']
+      const out = process.env['CTEXT_COMPAT_REPORT_OUT'] ?? join(app.getPath('temp'), 'ctext-compat-report.json')
+      const keyword = process.env['CTEXT_COMPAT_REPORT_KEYWORD']
+      const limitRaw = Number(process.env['CTEXT_COMPAT_REPORT_LIMIT'] ?? '0')
+      try {
+        const { runSampleReport, writeSampleReport } = await import('./engine/source/sample-report')
+        const report = await runSampleReport({
+          dir,
+          ...(keyword !== undefined && keyword !== '' ? { keyword } : {}),
+          ...(Number.isFinite(limitRaw) && limitRaw > 0 ? { limit: limitRaw } : {})
+        })
+        const files = await writeSampleReport(report, out)
+        for (const source of report.sources) {
+          const failed = source.stages.find((stage) => !stage.ok)
+          if (failed === undefined) continue
+          console.log(
+            `SAMPLE FAIL ${source.name} [${failed.stage}/${failed.kind ?? 'unknown'}] ${failed.message ?? ''}`
+          )
+        }
+        console.log(
+          `SAMPLE SUMMARY ${report.passed}/${report.total} rate=${(report.rate * 100).toFixed(1)}% skipped=${report.skipped.length}`
+        )
+        console.log(`SAMPLE REPORT ${files.markdown}`)
+        app.exit(0)
+      } catch (err) {
+        console.error(`SAMPLE ERROR ${err instanceof Error ? err.message : String(err)}`)
+        app.exit(1)
+      }
+      return
+    }
 
     // M0-03：数据库在窗口创建之前初始化，失败则不进入界面
     const dbFile = join(app.getPath('userData'), 'ctext.db')
@@ -350,6 +643,22 @@ if (!gotLock) {
       return
     }
 
+    /**
+     * M5-01：常规设置里有两项不落在库里——开机自启写系统登录项，
+     * 关闭/最小化行为决定托盘要不要存在。启动时先落一次，
+     * 再建窗口（`--hidden` 时窗口要看托盘在不在才决定显示与否）。
+     */
+    installTrayHandlers({
+      onShow: showMainWindow,
+      onQuit: () => {
+        quitting = true
+        app.quit()
+      }
+    })
+    const startupGeneral = generalSettings()
+    applyGeneralSettings(startupGeneral)
+    syncTray(startupGeneral.closeAction === 'tray' || startupGeneral.minimizeToTray)
+
     createWindow()
 
     // M0-06 自检：日志落盘 / 脱敏 / 级别 / 耗时 / 错误码映射 / 全局兜底
@@ -375,6 +684,12 @@ if (!gotLock) {
       return
     }
 
+    // M5-01 自检：设置页七组（常规/阅读/目录/书源/存储/快捷键/关于）的界面 ↔ 库同步
+    if (!app.isPackaged && mainWindow && process.env['CTEXT_SETTINGS_UI_SMOKE'] === '1') {
+      await runSettingsUiSmoke(mainWindow)
+      return
+    }
+
     // M1-08 自检：1 万本压测（接口 P95 / 虚拟 DOM 有界 / 滚动帧率 / 触底分页）
     if (!app.isPackaged && mainWindow && process.env['CTEXT_LIST_SMOKE'] === '1') {
       await runListSmoke(mainWindow)
@@ -390,6 +705,30 @@ if (!gotLock) {
     // M3 出口验收：三者语义不混淆 / 删除类操作二次确认且不删文件
     if (!app.isPackaged && mainWindow && process.env['CTEXT_M3_SMOKE'] === '1') {
       await runM3Smoke(mainWindow, process.env['CTEXT_M3_DIR'] ?? '')
+      return
+    }
+
+    // M4-07 自检：书源页真实点击（列表 / 启停 / 详情 / 合规门 / 粘贴导入 / 删除确认）
+    if (!app.isPackaged && mainWindow && process.env['CTEXT_SOURCES_UI_SMOKE'] === '1') {
+      const checks = await runSourcesUiSmoke(mainWindow)
+      for (const c of checks) {
+        console.log(`SMOKE SOURCESUI ${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.detail ? ` (${c.detail})` : ''}`)
+      }
+      const failed = checks.filter((c) => !c.ok).length
+      console.log(`SMOKE SOURCESUI SUMMARY ${checks.length - failed}/${checks.length}`)
+      app.exit(failed === 0 ? 0 : 1)
+      return
+    }
+
+    // M4-09 自检：网络搜索 → 加入书架 → 详情页刷新目录（真实点击）
+    if (!app.isPackaged && mainWindow && process.env['CTEXT_SOURCE_BOOK_UI_SMOKE'] === '1') {
+      const checks = await runBookUiSmoke(mainWindow)
+      for (const c of checks) {
+        console.log(`SMOKE BOOKUI ${c.ok ? 'PASS' : 'FAIL'} ${c.name}${c.detail ? ` (${c.detail})` : ''}`)
+      }
+      const failed = checks.filter((c) => !c.ok).length
+      console.log(`SMOKE BOOKUI SUMMARY ${checks.length - failed}/${checks.length}`)
+      app.exit(failed === 0 ? 0 : 1)
       return
     }
 
@@ -447,7 +786,7 @@ if (!gotLock) {
 
     // M2-07 自检：设置读写（默认值 / 合并语义 / 分区隔离 / 坏数据容错 / 入参校验）
     if (!app.isPackaged && process.env['CTEXT_SETTINGS_SMOKE'] === '1') {
-      runSettingsSmoke()
+      await runSettingsSmoke()
       return
     }
 
@@ -575,6 +914,7 @@ if (!gotLock) {
   // 正常退出时关闭连接，让 WAL 落盘并清掉 -wal / -shm；
   // 同时停掉 Python worker（关 stdin 让它自己退，避免留下孤儿进程）
   app.on('will-quit', () => {
+    destroyTray()
     stopRootsMonitor()
     closeDatabase()
     void disposePythonBridge()

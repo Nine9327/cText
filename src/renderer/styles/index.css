@@ -99,8 +99,11 @@
     @apply inline-flex items-center gap-1.5 rounded-md border border-line bg-elevated px-3 py-1.5 text-[12.5px] text-dim transition-colors duration-120 hover:border-line-strong hover:text-ink;
   }
 
+  /* text-left 不能省：导航项里的文字是 flex-1 撑满的 span，button 的 UA 样式
+     `text-align:center` 会被它继承，短标签（「阅读」「存储」）就会飘到中间去，
+     和图标拉出一大段空白。RouterLink 版本本来就继承 body 的左对齐，加在这里统一。 */
   .ct-nav-item {
-    @apply flex w-full items-center gap-2.5 rounded-md px-2.5 py-[7px] text-[13px] text-dim transition-colors duration-120 hover:bg-hover hover:text-ink;
+    @apply flex w-full items-center gap-2.5 rounded-md px-2.5 py-[7px] text-left text-[13px] text-dim transition-colors duration-120 hover:bg-hover hover:text-ink;
   }
 
   .ct-nav-item-active {

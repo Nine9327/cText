@@ -9,12 +9,14 @@
  *   4. 折叠态不渲染分区明细，入口退化成图标按钮（hover 有 title 提示）。
  *   5. 数据全部来自 store，M1 换成真实查询时本文件不用动。
  *
- * **「网络小说」与「设置」入口暂不渲染**：前者整个模块是 M4 的占位（侧栏会显示
- * fixture 假书源），后者是 ComingSoon 页（M5-01）。未实现的功能宁可不给入口，
- * 也不要让用户点进去看到一句「敬请期待」；路由保留，手输 URL 仍可到达。
+ * **「设置」入口在底部**（M5-01 交付后放开）：它不属于「浏览书」这条主线，
+ * 放在书库/收藏/书架/网络小说之后、紧贴侧栏底部，符合「设置是低频入口」的定位。
+ * 折叠态给一个齿轮图标，与展开态同一个路由。
  */
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import AppIcon from '@/components/common/AppIcon.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import LibrarySwitcher from '@/components/layout/LibrarySwitcher.vue'
 import SidebarSection from '@/components/layout/SidebarSection.vue'
 import ShelfNameDialog from '@/components/library/ShelfNameDialog.vue'
@@ -22,9 +24,11 @@ import { pushToast } from '@/lib/toast'
 import { BOOK_MIME, SHELF_MIME, getDragSource, setDragSource } from '@/lib/drag'
 import { useLibraryStore } from '@/stores/library'
 import { useUiStore } from '@/stores/ui'
+import type { ShelfDTO } from '@shared/dto'
 
 const library = useLibraryStore()
 const ui = useUiStore()
+const router = useRouter()
 
 const collapsed = computed(() => ui.state.sidebarCollapsed)
 
@@ -87,6 +91,94 @@ function acceptDrag(event: DragEvent): boolean {
   const types = event.dataTransfer?.types ?? []
   return types.includes(BOOK_MIME) || types.includes(SHELF_MIME)
 }
+
+// ---------------------------------------------------------------- 书架菜单
+
+/**
+ * 侧栏书架条目的重命名 / 删除（M3-02 补齐）。
+ *
+ * 总览页的卡片只在 hover 时露出两个小图标，站到侧栏想处理一个书架时没路可走；
+ * 这里是同一批操作的第二个入口，右键与「⋯」按钮都打开同一份菜单。
+ *
+ * 删除仍然只解分组（`shelves:remove` 只删 shelves 行，书一行不动），
+ * 确认框文案照旧把「书不会被删」写在最前面。
+ */
+const shelfMenu = ref<{ x: number; y: number; shelf: ShelfDTO } | null>(null)
+const renamingShelf = ref<ShelfDTO | null>(null)
+const removingShelf = ref<ShelfDTO | null>(null)
+
+/** 菜单不能出屏幕：靠近底部的书架右键时按视口夹回去 */
+const shelfMenuStyle = computed(() => ({
+  left: `${Math.min(shelfMenu.value?.x ?? 0, Math.max(0, window.innerWidth - 180))}px`,
+  top: `${Math.min(shelfMenu.value?.y ?? 0, Math.max(0, window.innerHeight - 96))}px`
+}))
+
+function openShelfMenu(event: MouseEvent, shelf: ShelfDTO): void {
+  event.preventDefault()
+  shelfMenu.value = { x: event.clientX, y: event.clientY, shelf }
+}
+
+function closeShelfMenu(): void {
+  shelfMenu.value = null
+}
+
+function onMenuPointerDown(event: PointerEvent): void {
+  if (shelfMenu.value === null) return
+  const target = event.target as HTMLElement | null
+  if (target?.closest('[data-shelf-menu]')) return
+  closeShelfMenu()
+}
+
+function onMenuKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape' && shelfMenu.value !== null) closeShelfMenu()
+}
+
+onMounted(() => {
+  document.addEventListener('pointerdown', onMenuPointerDown, true)
+  document.addEventListener('keydown', onMenuKeydown)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onMenuPointerDown, true)
+  document.removeEventListener('keydown', onMenuKeydown)
+})
+
+function startRename(shelf: ShelfDTO): void {
+  closeShelfMenu()
+  renamingShelf.value = shelf
+}
+
+async function confirmRename(name: string): Promise<void> {
+  const target = renamingShelf.value
+  renamingShelf.value = null
+  if (!target) return
+  try {
+    await library.renameShelf(target.id, name)
+    pushToast({ level: 'info', message: `书架已改名为「${name}」` })
+  } catch (err) {
+    pushToast({ level: 'error', message: err instanceof Error ? err.message : '重命名书架失败' })
+  }
+}
+
+function startRemove(shelf: ShelfDTO): void {
+  closeShelfMenu()
+  removingShelf.value = shelf
+}
+
+async function confirmRemove(): Promise<void> {
+  const target = removingShelf.value
+  removingShelf.value = null
+  if (!target) return
+  try {
+    // 正在看的这个书架被删掉：路由还指着它就会显示「书架不存在」
+    const viewing = router.currentRoute.value.params['shelfId'] === target.id
+    await library.removeShelf(target.id)
+    if (viewing) void router.push('/shelves')
+    pushToast({ level: 'info', message: `已删除书架「${target.name}」，书籍仍保留在书库中` })
+  } catch (err) {
+    pushToast({ level: 'error', message: err instanceof Error ? err.message : '删除书架失败' })
+  }
+}
 </script>
 
 <template>
@@ -118,6 +210,10 @@ function acceptDrag(event: DragEvent): boolean {
           <span class="flex-1 truncate">收藏的书籍</span>
           <span class="text-[11px] text-faint" data-fav-count>{{ library.favCount }}</span>
         </RouterLink>
+        <RouterLink to="/sources" class="ct-nav-item" active-class="ct-nav-item-active" data-nav="sources">
+          <AppIcon name="globe" :size="15" />
+          <span class="flex-1 truncate">网络小说</span>
+        </RouterLink>
       </nav>
 
       <!-- 可滚动的分区区：书架与书源数量都可能很长，底部操作区固定 -->
@@ -141,30 +237,51 @@ function acceptDrag(event: DragEvent): boolean {
             </button>
           </template>
 
-          <RouterLink
+          <!-- 条目本身可点、可拖；右侧「⋯」与右键都能打开同一份书架菜单 -->
+          <div
             v-for="shelf in library.shelves"
             :key="shelf.id"
-            :to="`/shelves/${shelf.id}`"
-            class="ct-nav-item"
-            :class="hoverShelfId === shelf.id && 'ring-1 ring-inset ring-accent/60'"
-            active-class="ct-nav-item-active"
-            draggable="true"
-            data-shelf-item
-            @dragstart="
-              (event) => {
-                setDragSource({ kind: 'shelf', id: shelf.id })
-                event.dataTransfer?.setData(SHELF_MIME, shelf.id)
-                hoverShelfId = null
-              }
-            "
-            @dragover.prevent="acceptDrag($event) && (hoverShelfId = shelf.id)"
-            @dragleave="hoverShelfId === shelf.id && (hoverShelfId = null)"
-            @drop.prevent="onShelfDrop($event, shelf.id)"
+            class="group relative"
+            data-shelf-row
+            @contextmenu="openShelfMenu($event, shelf)"
           >
-            <AppIcon name="folder" :size="14" class="text-faint" />
-            <span class="flex-1 truncate">{{ shelf.name }}</span>
-            <span class="text-[11px] text-faint">{{ shelf.bookCount }}</span>
-          </RouterLink>
+            <RouterLink
+              :to="`/shelves/${shelf.id}`"
+              class="ct-nav-item"
+              :class="hoverShelfId === shelf.id && 'ring-1 ring-inset ring-accent/60'"
+              active-class="ct-nav-item-active"
+              draggable="true"
+              data-shelf-item
+              @dragstart="
+                (event) => {
+                  setDragSource({ kind: 'shelf', id: shelf.id })
+                  event.dataTransfer?.setData(SHELF_MIME, shelf.id)
+                  hoverShelfId = null
+                }
+              "
+              @dragover.prevent="acceptDrag($event) && (hoverShelfId = shelf.id)"
+              @dragleave="hoverShelfId === shelf.id && (hoverShelfId = null)"
+              @drop.prevent="onShelfDrop($event, shelf.id)"
+            >
+              <AppIcon name="folder" :size="14" class="text-faint" />
+              <span class="flex-1 truncate">{{ shelf.name }}</span>
+              <span class="text-[11px] text-faint transition-opacity duration-120 group-hover:opacity-0">
+                {{ shelf.bookCount }}
+              </span>
+            </RouterLink>
+
+            <!-- 计数在 hover 时让位给这个按钮：两者都要占右边缘，叠着会互相盖住 -->
+            <button
+              type="button"
+              class="ct-icon-btn absolute right-0.5 top-1/2 h-6 w-6 -translate-y-1/2 opacity-0 transition-opacity duration-120 focus-visible:opacity-100 group-hover:opacity-100"
+              title="书架操作"
+              aria-label="书架操作"
+              data-shelf-more
+              @click.stop="openShelfMenu($event, shelf)"
+            >
+              <AppIcon name="drag" :size="12" />
+            </button>
+          </div>
 
           <p v-if="library.shelves.length === 0" class="px-2 py-1 text-[11.5px] text-faint">
             还没有书架
@@ -172,7 +289,16 @@ function acceptDrag(event: DragEvent): boolean {
         </SidebarSection>
       </div>
 
-      <div class="flex items-center justify-end border-t border-line p-2.5">
+      <div class="flex items-center gap-1 border-t border-line p-2.5">
+        <RouterLink
+          to="/settings"
+          class="ct-nav-item min-w-0 flex-1"
+          active-class="ct-nav-item-active"
+          data-nav="settings"
+        >
+          <AppIcon name="settings" :size="15" />
+          <span class="flex-1 truncate">设置</span>
+        </RouterLink>
         <button
           type="button"
           class="ct-icon-btn"
@@ -232,9 +358,29 @@ function acceptDrag(event: DragEvent): boolean {
         >
           <AppIcon name="folder" :size="16" />
         </RouterLink>
+        <RouterLink
+          to="/sources"
+          class="ct-rail-item"
+          active-class="ct-rail-item-active"
+          title="网络小说"
+          aria-label="网络小说"
+          data-nav="sources"
+        >
+          <AppIcon name="globe" :size="16" />
+        </RouterLink>
       </nav>
 
       <div class="mt-auto flex flex-col items-center gap-1 border-t border-line px-2 py-2.5">
+        <RouterLink
+          to="/settings"
+          class="ct-rail-item"
+          active-class="ct-rail-item-active"
+          title="设置"
+          aria-label="设置"
+          data-nav="settings"
+        >
+          <AppIcon name="settings" :size="16" />
+        </RouterLink>
         <button
           type="button"
           class="ct-rail-item"
@@ -254,6 +400,48 @@ function acceptDrag(event: DragEvent): boolean {
       confirm-text="创建"
       @confirm="confirmCreate"
       @cancel="creating = false"
+    />
+
+    <!-- 书架菜单：右键与「⋯」共用，位置跟随鼠标并夹在视口内 -->
+    <div
+      v-if="shelfMenu !== null"
+      class="fixed z-[60] w-[172px] rounded-lg border border-line bg-elevated p-1 shadow-[0_12px_32px_rgba(0,0,0,.55)]"
+      :style="shelfMenuStyle"
+      data-shelf-menu
+    >
+      <p class="truncate px-2 pb-1 pt-0.5 text-[10.5px] text-faint" data-shelf-menu-title>
+        {{ shelfMenu.shelf.name }}
+      </p>
+      <button type="button" class="ct-menu-item" data-shelf-menu-rename @click="startRename(shelfMenu.shelf)">
+        <AppIcon name="settings" :size="13" />重命名
+      </button>
+      <button
+        type="button"
+        class="ct-menu-item hover:text-rose-300"
+        data-shelf-menu-remove
+        @click="startRemove(shelfMenu.shelf)"
+      >
+        <AppIcon name="close" :size="13" />删除书架
+      </button>
+    </div>
+
+    <ShelfNameDialog
+      :open="renamingShelf !== null"
+      title="重命名书架"
+      :initial="renamingShelf?.name ?? ''"
+      confirm-text="保存"
+      @confirm="confirmRename"
+      @cancel="renamingShelf = null"
+    />
+
+    <ConfirmDialog
+      :open="removingShelf !== null"
+      title="删除这个书架？"
+      :desc="`「${removingShelf?.name ?? ''}」会从侧栏移除。书架里的 ${removingShelf?.bookCount ?? 0} 本书不会被删除，它们仍留在书库中，阅读进度也不受影响。`"
+      confirm-text="删除书架"
+      danger
+      @confirm="confirmRemove"
+      @cancel="removingShelf = null"
     />
   </aside>
 </template>

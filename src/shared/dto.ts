@@ -288,6 +288,10 @@ export interface SourceDTO {
   customOrder: number
   lastUsedAt: number | null
   createdAt: number
+  /** 连续超时次数（M4-12）；>0 时界面上给一个轻提示 */
+  failStreak: number
+  /** 熔断提示（已临时停用时非空），读取时按当前时间算好，界面直接显示 */
+  breakerNote: string | null
 }
 
 export type SourceImportStatus = 'imported' | 'updated' | 'skipped' | 'failed'
@@ -329,6 +333,11 @@ export interface SourceSearchItemDTO {
   bookUrl: string
   kind: string | null
   lastChapter: string | null
+  /**
+   * 同名合并掉的其它来源。合并只改**展示**：主项保留首次出现的那一条，
+   * 其余源的 bookUrl 放这里，用户仍能选择从哪个源读。
+   */
+  alsoIn?: Array<{ sourceId: string; sourceName: string; bookUrl: string }>
 }
 
 export interface SourceSearchGroupDTO {
@@ -349,6 +358,108 @@ export interface SourceSearchResultDTO {
   keyword: string
   groups: SourceSearchGroupDTO[]
   failures: SourceSearchFailureDTO[]
+  elapsedMs: number
+}
+
+/**
+ * 加入书架（M4-09）的结果。
+ *
+ * `reused` 为 true 表示这本书已经在书架上，本次只把目录刷了一遍——界面据此
+ * 提示「已在书架，目录已更新」，而不是假装新加了一本（会导致用户以为有重复）。
+ */
+export interface NetworkBookAddResultDTO {
+  bookId: string
+  title: string
+  chapterCount: number
+  reused: boolean
+}
+
+/** 单本书的缓存占用（缓存用量页只列占用最大的若干本） */
+export interface SourceCacheBookDTO {
+  bookId: string
+  /** 书已从书架删除时为 null */
+  title: string | null
+  files: number
+  bytes: number
+}
+
+/**
+ * 正文缓存用量（M4-10）。
+ *
+ * `expired*` 单独报而不是直接删：过期的章节在断网时仍然可读（读失败会回退到它），
+ * 所以「过期」是「下次联网会重抓」的意思，不是「已经没用了」。
+ */
+export interface SourceCacheStatsDTO {
+  /** 缓存根目录，设置页的「打开目录」直接用它 */
+  dir: string
+  files: number
+  bytes: number
+  expiredFiles: number
+  expiredBytes: number
+  ttlDays: number
+  /** 有缓存的书籍总数（`books` 只给占用最大的前 20 本） */
+  totalBooks: number
+  books: SourceCacheBookDTO[]
+}
+
+// ---------------------------------------------------------------- 规则调试（M4-11）
+
+export type SourceDebugPhase = 'search' | 'info' | 'toc' | 'content'
+
+/**
+ * 调试面板的一步。
+ *
+ * `kind` 区分「发了请求」与「跑了一条规则」：请求步看 status / url / snippet，
+ * 规则步看 rule / values。两者塞进同一个数组是为了保留真实先后顺序——
+ * 用户排查的是「请求回来了，然后规则没取到」这类因果。
+ */
+export interface SourceDebugStepDTO {
+  kind: 'request' | 'rule'
+  /** 这一步在做什么：「详情页」「目录第 2 页」「详情字段 name」 */
+  label: string
+  /** 规则原文；请求步为 null */
+  rule: string | null
+  /** 实际请求地址（跟完重定向）；规则步为 null */
+  url: string | null
+  status: number | null
+  /** 响应体前 2KB（超长已截断并标注） */
+  snippet: string | null
+  /** 提取结果（规则步才有；最多 20 条、单条 300 字） */
+  values: string[]
+  elapsedMs: number
+  error: string | null
+}
+
+export interface SourceDebugSectionDTO {
+  phase: SourceDebugPhase
+  ok: boolean
+  /** 缺前置输入（没填关键词/地址）时跳过：这时 `ok` 为 false，但不算失败 */
+  skipped: boolean
+  /** 一句话结论：「3 章 / 1 页」「1204 字 / 1 页」 */
+  summary: string
+  error: string | null
+  elapsedMs: number
+  steps: SourceDebugStepDTO[]
+}
+
+export interface SourceDebugInputDTO {
+  sourceId: string
+  /** 详情页地址；只跑目录时可以填目录页地址 */
+  url?: string
+  /** 搜索段的关键词 */
+  keyword?: string
+  /** 正文段用；不填则取目录的第一章 */
+  chapterUrl?: string
+  /** 不填 = 四段全跑 */
+  phases?: SourceDebugPhase[]
+}
+
+export interface SourceDebugResultDTO {
+  sourceId: string
+  sourceName: string
+  url: string | null
+  keyword: string | null
+  sections: SourceDebugSectionDTO[]
   elapsedMs: number
 }
 
@@ -427,6 +538,32 @@ export interface AppInfoDTO {
   safeMode: boolean
   /** 进入安全模式的原因：dev / env / argv / fallback / none */
   safeModeSource: string
+}
+
+/**
+ * 「打开目录」的目标（M5-01 设置页）。
+ *
+ * 用枚举而不是让渲染层传绝对路径：`shell.openPath` 能打开任意路径，
+ * 若做成「传路径」的通道，等于给渲染层（以及任何注入脚本）一个
+ * 「用系统默认程序打开任意文件」的能力。设置页只需要这几个固定目录。
+ */
+export type OpenPathTarget = 'logs' | 'data' | 'db' | 'covers' | 'chapters'
+
+export interface StorageDirStatsDTO {
+  dir: string
+  files: number
+  bytes: number
+}
+
+/** 设置页「存储」组的一次性汇总：两个缓存目录 + 三个路径 */
+export interface SystemStorageStatsDTO {
+  covers: StorageDirStatsDTO
+  /** 网络书正文缓存（与 `source:cacheStats` 同源，这里只要总量） */
+  chapters: StorageDirStatsDTO
+  dataDir: string
+  logDir: string
+  /** 当前生效的封面上限（MB）；0 = 不限制 */
+  coverCacheLimitMb: number
 }
 
 export interface EchoRequest {

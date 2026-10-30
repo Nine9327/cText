@@ -20,6 +20,9 @@ export const INVOKE_CHANNELS = defineChannels<IpcChannel>()([
   'system:echo',
   'system:info',
   'system:worker-health',
+  'system:openPath',
+  'system:storageStats',
+  'system:clearCovers',
   'window:get-state',
 
   'library:list',
@@ -78,11 +81,22 @@ export const INVOKE_CHANNELS = defineChannels<IpcChannel>()([
   'source:import',
   'source:list',
   'source:toggle',
+  'source:remove',
+  'source:reorder',
+  'source:export',
+  'source:pickFile',
   'source:search',
+  'source:addBook',
   'source:refreshToc',
+  'source:cacheStats',
+  'source:clearCache',
+  'source:openCacheDir',
+  'source:debug',
+  'source:resetBreaker',
 
   'settings:get',
-  'settings:patch'
+  'settings:patch',
+  'settings:reset'
 ])
 
 export const EVENT_CHANNELS = defineChannels<IpcEventChannel>()([

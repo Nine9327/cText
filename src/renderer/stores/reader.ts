@@ -266,7 +266,14 @@ export const useReaderStore = defineStore('reader', () => {
     patchReader({ rememberProgress: value }, true)
   }
 
-  function setMode(next: ReaderMode): void {
+  /**
+   * 切阅读模式。
+   *
+   * 接受 `'auto'`（M5-01 的设置页要能把用户改过的模式**改回跟随书籍**）：
+   * 阅读器内的面板只给「翻页/滚动」两个按钮，因为那时用户是想覆盖当前这本书；
+   * 设置页是全局偏好，必须能表达「不覆盖」。
+   */
+  function setMode(next: ReaderModeSetting): void {
     if (next === mode.value) return
     mode.value = next
     patchReader({ mode: next }, true)
@@ -339,6 +346,8 @@ export const useReaderStore = defineStore('reader', () => {
     loaded,
     load,
     apply,
+    /** 设置页批量恢复默认键位后，用它把本地副本同步成刚落库的那份 */
+    applyShortcuts,
     palette,
     fontStack,
     verticalMargin,

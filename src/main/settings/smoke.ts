@@ -11,9 +11,15 @@
  * 只在 `!app.isPackaged && CTEXT_SETTINGS_SMOKE=1` 时执行（临时库）。
  */
 import { app } from 'electron'
+import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { ipcSchemas } from '@shared/ipc/schemas'
 import { getDb } from '../db/connection'
 import { DEFAULT_SETTINGS, loadSettings, patchSettings, resetSettings } from '../db/repositories/settings'
+import { trayIconPath } from '../platform/tray'
+import { loginItemPlan, shouldStartHidden } from './apply'
+import { dirStats, pruneCovers } from './storage'
 
 export interface Check {
   name: string
@@ -21,7 +27,7 @@ export interface Check {
   detail: string
 }
 
-export function runSettingsSmoke(): void {
+export async function runSettingsSmoke(): Promise<void> {
   const checks: Check[] = []
   const check = (name: string, ok: boolean, detail = ''): void => {
     checks.push({ name, ok: !!ok, detail })
@@ -142,6 +148,66 @@ export function runSettingsSmoke(): void {
     reset.reader.fontSize === 18 && reset.reader.mode === 'auto' && reset.general.closeAction === 'quit',
     `${reset.reader.fontSize}px / ${reset.reader.mode}`
   )
+
+  /*
+   * 11. 常规设置的副作用（M5-01）。
+   *
+   * 开机自启写的是系统登录项，自检绝不能真的去写注册表——所以这一层只测
+   * 「该传什么参数给系统」，实际调用在 apply.ts 里。
+   */
+  check('开发态不写系统登录项', loginItemPlan({ autoLaunch: true }, 'C:\\app\\cText.exe', false) === null)
+  const plan = loginItemPlan({ autoLaunch: true }, 'C:\\app\\cText.exe', true)
+  check(
+    '登录项带 --hidden 且指向当前程序',
+    plan !== null &&
+      plan.openAtLogin === true &&
+      plan.path === 'C:\\app\\cText.exe' &&
+      (plan.args ?? []).includes('--hidden'),
+    JSON.stringify(plan)
+  )
+  check('关闭自启动时 openAtLogin=false', loginItemPlan({ autoLaunch: false }, 'x', true)?.openAtLogin === false)
+  // 托盘图标读不出来时托盘会静默降级成「关窗即退出」，这条断言把那个失败提前到自检
+  check('托盘图标存在（dev 路径）', existsSync(trayIconPath()), trayIconPath())
+  check(
+    '自启动参数识别（--hidden）',
+    shouldStartHidden(['cText', '--hidden']) && !shouldStartHidden(['cText']),
+    '只在显式传参时静默启动'
+  )
+
+  /*
+   * 12. 存储统计与封面裁剪（M5-01）。
+   *
+   * 用临时目录造三个不同 mtime 的文件，上限设成「两倍文件大小」：
+   * 必须删掉**最旧**的那个，剩下的总大小不超过上限。
+   */
+  const dir = mkdtempSync(join(tmpdir(), 'ctext-settings-'))
+  try {
+    for (let i = 0; i < 3; i += 1) {
+      const file = join(dir, `cover_${i}.png`)
+      writeFileSync(file, Buffer.alloc(1000, i + 1))
+      // 强制新老顺序：cover_0 最旧，cover_2 最新
+      const when = new Date(Date.now() - (3 - i) * 60_000)
+      utimesSync(file, when, when)
+    }
+    const before = await dirStats(dir)
+    check('目录统计：3 个文件 3000 字节', before.files === 3 && before.bytes === 3000, `${before.files} / ${before.bytes}`)
+
+    const removed = await pruneCovers(dir, 2000)
+    const names = readdirSync(dir).sort()
+    const left = names.reduce((sum, name) => sum + statSync(join(dir, name)).size, 0)
+    check('裁剪删掉最旧的一个文件', removed.files === 1 && !names.includes('cover_0.png'), names.join(','))
+    check('裁剪后总量不超过上限', left === 2000 && left <= 2000, `${left} 字节`)
+
+    const again = await pruneCovers(dir, 2000)
+    check('未超上限时不删任何文件', again.files === 0, `${again.files} 个`)
+
+    const unlimited = await pruneCovers(dir, 0)
+    check('上限 0 表示不限制', unlimited.files === 0 && readdirSync(dir).length === 2, `${readdirSync(dir).length} 个`)
+
+    check('不存在的目录统计为 0', (await dirStats(join(dir, 'nope'))).files === 0)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 
   const failed = checks.filter((item) => !item.ok).length
   console.log(`SMOKE SETTINGS SUMMARY ${checks.length - failed}/${checks.length}`)

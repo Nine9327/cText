@@ -77,16 +77,14 @@ const UI_CASES = String.raw`
       ['书库切换器', '[data-library-switcher]'],
       ['全部书籍', '[data-nav="library"]'],
       ['收藏的书籍', '[data-nav="favorites"]'],
-      ['我的书架', '[data-nav="shelves"]']
+      ['我的书架', '[data-nav="shelves"]'],
+      ['网络小说', '[data-nav="sources"]'],
+      ['设置', '[data-nav="settings"]']
     ]
     const missing = entries.filter(([, sel]) => !q(sel)).map(([name]) => name)
-    push('入口齐全（已实现的三个）', missing.length === 0, missing.length ? '缺少 ' + missing.join('、') : '书库切换器 + 3 个入口')
-    // 未实现的入口不渲染：网络小说（M4 占位）与设置（M5 ComingSoon）
-    push(
-      '未实现入口已隐藏',
-      !q('[data-nav="sources"]') && !q('[data-nav="settings"]') && !q('[data-source-item]'),
-      'sources/settings 入口均不应出现'
-    )
+    push('入口齐全（已实现的五个）', missing.length === 0, missing.length ? '缺少 ' + missing.join('、') : '书库切换器 + 5 个入口')
+    // 书源清单不是侧栏入口，只有进到网络小说页才会渲染
+    push('网络小说清单不在侧栏', !q('[data-source-item]'), 'data-source-item 不应出现在外壳')
 
     // M1-08 起列表是异步加载（IPC → SQL），计数要等到数据到位而不是元素出现
     const waitForCount = (expected) =>
@@ -158,6 +156,49 @@ const UI_CASES = String.raw`
     push('切回后恢复 16 本', (await waitForCount('16 本')) === '16 本', txt(q('[data-book-count]')))
     push('切回后最近阅读回来', !!q('[data-recent]'))
 
+    /*
+     * 行间距回归（本轮修的 bug）。
+     *
+     * 虚拟列表每一行都是绝对定位的独立容器，grid 的 rowGap 只在一行内部生效，
+     * 行与行之间的空隙完全由「rowHeight = 内容高 + rowGap」提供。旧写法
+     * 「measured ?? estimated + rowGap」一旦实测到行高就把行距丢掉了，表现为
+     * 第二行封面压在上一行的「已读 x%」上。这里直接量两行的 translateY 差值。
+     */
+    const rowGapNow = () => {
+      const rows = qa('[data-virtual-row]')
+      if (rows.length < 2) return null
+      const y = (el) => {
+        const m = /translateY\((-?[\d.]+)px\)/.exec(el.style.transform || '')
+        return m ? Number(m[1]) : null
+      }
+      const y0 = y(rows[0])
+      const y1 = y(rows[1])
+      const h = rows[0].firstElementChild ? rows[0].firstElementChild.offsetHeight : 0
+      return y0 === null || y1 === null || h === 0 ? null : Math.round(y1 - y0 - h)
+    }
+    const gapGrid = rowGapNow()
+    push('封面视图行间留出间距（24px）', gapGrid === 24, 'gap=' + gapGrid)
+
+    const viewBtn = (label) => qa('button').find((el) => txt(el) === label)
+    const detailBtn = viewBtn('详细')
+    if (detailBtn) detailBtn.click()
+    await sleep(250)
+    const gapDetail = rowGapNow()
+    push('详细视图行间留出间距（12px）', gapDetail === 12, 'gap=' + gapDetail)
+    const gridBtn = viewBtn('封面')
+    if (gridBtn) gridBtn.click()
+    await sleep(250)
+
+    // 最近阅读卡片必须能点开（曾漏绑定 click，卡片看着可点、点了没反应）。
+    // 只在路由层断言：阅读器内容渲染由 verify:reader 覆盖，这里要验的是「点了有去处」。
+    const recentEl = q('[data-recent-item]')
+    recentEl.click()
+    const enteredReader = await waitFor(() => route().startsWith('/reader/'), 6000)
+    push('点最近阅读能进阅读器', enteredReader === true, route())
+    // 阅读器是全屏布局，侧栏不存在，回列表只能走路由（也是用户按 Esc 退出后的路径）
+    location.hash = '#/library'
+    push('从阅读器回到书库列表', (await waitForCount('16 本')) === '16 本', txt(q('[data-book-count]')))
+
     // ---------------------------------------------------------------- 5.5 排序（M1-09）
     // fixture 的 16 本书里：书名升序首项 = 万历十五年（U+4E07 才是最小码点，
     // 别按「三体」的直觉猜——三体的 U+4E09 比它大）、
@@ -219,10 +260,10 @@ const UI_CASES = String.raw`
     const rail = q('[data-sidebar]')
     push('折叠后宽度 64px', rail && rail.getAttribute('data-collapsed') === '1' && rail.offsetWidth === 64, (rail ? rail.offsetWidth : 0) + 'px')
     push(
-      '折叠态三个入口仍在',
-      ['library', 'favorites', 'shelves'].every((key) => !!q('[data-nav="' + key + '"]'))
+      '折叠态五个入口仍在',
+      ['library', 'favorites', 'shelves', 'sources', 'settings'].every((key) => !!q('[data-nav="' + key + '"]'))
     )
-    push('折叠态不出现未实现入口', !q('[data-nav="sources"]') && !q('[data-nav="settings"]'))
+    push('折叠态设置入口可读', (q('[data-nav="settings"]')?.getAttribute('aria-label') ?? '') === '设置')
     await click('[data-nav="favorites"]')
     checkRoute('/favorites')
     checkActive('收藏的书籍')

@@ -26,6 +26,10 @@ export type IconName =
   | 'restore'
   | 'close'
   | 'bookmark'
+  | 'trash'
+  | 'download'
+  | 'drag'
+  | 'link'
 
 export const iconPaths: Record<IconName, string> = {
   book: 'M6.5 3H19v18H6.5A2.5 2.5 0 0 1 4 18.5v-13A2.5 2.5 0 0 1 6.5 3ZM4 18.5A2.5 2.5 0 0 1 6.5 16H19',
@@ -55,5 +59,9 @@ export const iconPaths: Record<IconName, string> = {
   minimize: 'M5 12h14',
   maximize: 'M5.5 5.5h13v13h-13z',
   restore: 'M8 8V5.5h10.5V16H16M5.5 8h10.5v10.5H5.5z',
+  trash: 'M5 7h14M9.5 7V4.8h5V7M7.2 7l.9 12.2A1.6 1.6 0 0 0 9.7 20.7h4.6a1.6 1.6 0 0 0 1.6-1.5L16.8 7M10.3 10.6v6.6M13.7 10.6v6.6',
+  download: 'M12 3.5v11M8.2 10.8 12 14.6l3.8-3.8M4 16.5v2.2A1.8 1.8 0 0 0 5.8 20.5h12.4a1.8 1.8 0 0 0 1.8-1.8v-2.2',
+  drag: 'M9 6.5h.01M15 6.5h.01M9 12h.01M15 12h.01M9 17.5h.01M15 17.5h.01',
+  link: 'M10.5 13.5a3.6 3.6 0 0 0 5.1 0l2.7-2.7a3.6 3.6 0 0 0-5.1-5.1L11.8 7M13.5 10.5a3.6 3.6 0 0 0-5.1 0l-2.7 2.7a3.6 3.6 0 0 0 5.1 5.1l1.4-1.3',
   close: 'M6.5 6.5l11 11M17.5 6.5l-11 11'
 }

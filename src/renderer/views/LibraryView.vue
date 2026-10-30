@@ -24,7 +24,9 @@ import CategoryFilter from '@/components/library/CategoryFilter.vue'
 import CategoryManager from '@/components/library/CategoryManager.vue'
 import BookContextMenu from '@/components/book/BookContextMenu.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import ShelfNameDialog from '@/components/library/ShelfNameDialog.vue'
 import BookCard from '@/components/book/BookCard.vue'
+import { coverGradient } from '@/lib/cover'
 import { pushToast } from '@/lib/toast'
 import { call } from '@/api/client'
 import { BOOK_MIME, getDragSource } from '@/lib/drag'
@@ -43,10 +45,13 @@ const router = useRouter()
  * 网络书还没有正文通路（书源模块属 M4），先给提示而不是跳进一个空白阅读页。
  */
 function openBook(book: BookDTO): void {
-  if (book.sourceType === 'network') {
-    pushToast({ level: 'info', message: '网络书阅读暂未开放' })
-    return
-  }
+  /*
+   * 网络书与本地书走同一个阅读路由。
+   *
+   * M1 时这里拦过一次（那时没有正文通路，跳进去是空白页），M4-09 接通
+   * `reader/content.ts` 的 network 分支后这个拦截就变成了「功能明明有、
+   * 却告诉你没有」——比不做更糟。
+   */
   void router.push(`/reader/${book.id}`)
 }
 const library = useLibraryStore()
@@ -80,6 +85,43 @@ async function removeFromShelf(book: BookDTO): Promise<void> {
     pushToast({ level: 'info', message: `已把《${book.title}》移出书架，文件仍在书库中` })
   } catch (err) {
     pushToast({ level: 'error', message: err instanceof Error ? err.message : '移出书架失败' })
+  }
+}
+
+/**
+ * 书架本身的改名 / 删除。
+ *
+ * 入口原本只在我书架总览页的卡片 hover 里（M3-02），用户站在书架详情页想
+ * 处理这个书架时反而要退回去找。删除同样只解分组：`shelves:remove` 删的是
+ * `shelves` 行，`shelf_books` 靠外键 CASCADE 走，`books` 一行不动。
+ */
+const shelfRenaming = ref(false)
+const shelfRemoving = ref(false)
+
+async function confirmRenameShelf(name: string): Promise<void> {
+  const id = shelfId.value
+  shelfRenaming.value = false
+  if (!id) return
+  try {
+    await library.renameShelf(id, name)
+    pushToast({ level: 'info', message: `书架已改名为「${name}」` })
+  } catch (err) {
+    pushToast({ level: 'error', message: err instanceof Error ? err.message : '重命名失败' })
+  }
+}
+
+async function confirmRemoveShelf(): Promise<void> {
+  const id = shelfId.value
+  const name = shelf.value?.name ?? ''
+  shelfRemoving.value = false
+  if (!id) return
+  try {
+    await library.removeShelf(id)
+    // 域已经被清空，继续留在 /shelves/:id 会变成「书架不存在」，退回总览
+    void router.push('/shelves')
+    pushToast({ level: 'info', message: `已删除书架「${name}」，书籍仍保留在书库中` })
+  } catch (err) {
+    pushToast({ level: 'error', message: err instanceof Error ? err.message : '删除书架失败' })
   }
 }
 
@@ -218,6 +260,36 @@ async function addToShelfMany(shelfId: string, books: BookDTO[]): Promise<void> 
     pushToast({ level: 'info', message: `已加入「${shelf?.name ?? ''}」${result.added} 本` })
   } catch (err) {
     pushToast({ level: 'error', message: err instanceof Error ? err.message : '加入书架失败' })
+  }
+}
+
+/**
+ * 批量移出书架（书架域专用）。
+ *
+ * 卡片上的 ✕ 一次只处理一本，书架里筛出一批「不打算读了」的书时太慢。
+ * 撤销靠 `addToShelf` 加回去，但**顺序不保证还原**——服务端一律追加到末尾，
+ * 提示里不承诺顺序，免得用户撤销后发现架子被重排过一次。
+ */
+async function removeManyFromShelf(): Promise<void> {
+  const id = shelfId.value
+  const ids = [...selected.value]
+  if (!id || ids.length === 0) return
+  try {
+    const removed = await library.removeFromShelf(id, ids)
+    selected.value = []
+    if (removed === 0) {
+      pushToast({ level: 'info', message: '这些书已经不在该书架里了' })
+      return
+    }
+    undo.value = {
+      label: `移出书架 ${removed} 本`,
+      run: async () => {
+        await library.addToShelf(id, ids)
+      }
+    }
+    pushToast({ level: 'info', message: `已把 ${removed} 本移出书架，文件仍在书库中` })
+  } catch (err) {
+    pushToast({ level: 'error', message: err instanceof Error ? err.message : '移出书架失败' })
   }
 }
 
@@ -388,6 +460,18 @@ const title = computed(() => {
   return (route.meta.title as string) ?? '全部书籍'
 })
 
+/**
+ * 最近阅读卡片的封面渐变。
+ *
+ * 与 `BookCard` 用同一个哈希取色：同一本书在「最近阅读」和书库里必须是同一个颜色，
+ * 否则用户会以为这是两本不同的书。这里没有真封面（EPUB 抽图只走书卡那条路），
+ * 统一用默认封面，也就不需要处理加载失败。
+ */
+function coverOf(book: BookDTO): Record<string, string> {
+  const { from, to } = coverGradient(book.id)
+  return { background: `linear-gradient(155deg, ${from} 0%, ${to} 100%)` }
+}
+
 /** 最近阅读只在书库首页出现；搜索时整段隐藏（在搜索上下文里没有意义） */
 const showRecent = computed(() => route.name === 'library' && !library.keyword && library.recent.length > 0)
 
@@ -463,9 +547,18 @@ const estimatedRowHeight = computed(() => {
   return colW * (4 / 3) + 62
 })
 
-/** 实测行高：任何一行的真实渲染高度（卡片已强制等高）。null = 尚未实测，用估算值 */
+/** 实测行高（只存内容高度，行距由 rowHeight 统一补）。null = 尚未实测 */
 const measuredRowHeight = ref<number | null>(null)
-const rowHeight = computed(() => measuredRowHeight.value ?? estimatedRowHeight.value + geometry.value.rowGap)
+
+/**
+ * 行高 = 内容高 + 行距。
+ *
+ * **行距必须加在这里，不能只写在 grid 的 `rowGap` 上**：虚拟列表的每一行是独立的
+ * 绝对定位容器，`rowGap` 只在一行**内部**生效，行与行之间的空隙完全由这个值决定。
+ * 早先的写法是 `measured ?? estimated + rowGap`——只要实测到一次行高，行距就被
+ * 静默丢掉，表现为第二行封面直接压在上一行的状态文字上（封面视图最明显）。
+ */
+const rowHeight = computed(() => (measuredRowHeight.value ?? estimatedRowHeight.value) + geometry.value.rowGap)
 
 async function remeasureRow(): Promise<void> {
   await nextTick()
@@ -602,10 +695,18 @@ watch(
           <button
             v-for="book in library.recent"
             :key="book.id"
+            type="button"
             class="flex items-center gap-3 rounded-lg border border-line bg-card p-3 text-left transition-colors duration-120 hover:border-line-strong hover:bg-hover"
+            :title="`继续阅读《${book.title}》`"
+            data-recent-item
+            @click="openBook(book)"
           >
-            <div class="relative h-[62px] w-[46px] shrink-0 overflow-hidden rounded shadow-[0_2px_8px_rgba(0,0,0,.45)]">
+            <div
+              class="relative h-[62px] w-[46px] shrink-0 overflow-hidden rounded shadow-[0_2px_8px_rgba(0,0,0,.45)]"
+              :style="coverOf(book)"
+            >
               <span class="pointer-events-none absolute inset-y-0 left-0 w-[4px] bg-black/25" />
+              <span class="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-white/10" />
             </div>
             <div class="min-w-0 flex-1">
               <p class="line-clamp-2 text-[12.5px] leading-[1.45] text-ink/90">{{ book.title }}</p>
@@ -617,9 +718,28 @@ watch(
       </section>
 
       <!-- 非首页标题 -->
-      <div v-else class="mb-5 flex items-baseline gap-2">
-        <h1 class="text-[15px] font-medium text-ink" data-page-title>{{ title }}</h1>
-        <span v-if="isShelf && shelf" class="text-[11.5px] text-faint">{{ shelf.bookCount }} 本</span>
+      <div v-else class="mb-5 flex items-center justify-between gap-2">
+        <div class="flex items-baseline gap-2">
+          <h1 class="text-[15px] font-medium text-ink" data-page-title>{{ title }}</h1>
+          <span v-if="isShelf && shelf" class="text-[11.5px] text-faint">{{ shelf.bookCount }} 本</span>
+        </div>
+
+        <!-- 书架自身的操作：放在标题旁，因为「重命名/删除这个书架」的指代对象就是标题 -->
+        <div v-if="isShelf && shelf" class="flex items-center gap-2" data-shelf-actions>
+          <button type="button" class="ct-btn" data-shelf-rename-btn @click="shelfRenaming = true">
+            <AppIcon name="settings" :size="13" />
+            重命名
+          </button>
+          <button
+            type="button"
+            class="ct-btn border-rose-500/35 text-rose-300/90 hover:border-rose-400 hover:text-rose-200"
+            data-shelf-delete
+            @click="shelfRemoving = true"
+          >
+            <AppIcon name="close" :size="13" />
+            删除书架
+          </button>
+        </div>
       </div>
 
       <!-- 工具栏 -->
@@ -673,6 +793,16 @@ watch(
         </button>
         <button type="button" class="ct-btn" data-batch-shelf @click="picker = picker === 'shelf' ? null : 'shelf'">
           <AppIcon name="folder" :size="13" />加入书架
+        </button>
+        <button
+          v-if="isShelf"
+          type="button"
+          class="ct-btn border-rose-500/35 text-rose-300/90 hover:border-rose-400 hover:text-rose-200"
+          :disabled="selected.length === 0"
+          data-batch-unshelf
+          @click="removeManyFromShelf"
+        >
+          移出书架
         </button>
         <button type="button" class="ct-btn" data-batch-category @click="picker = picker === 'category' ? null : 'category'">
           <AppIcon name="layers" :size="13" />打上分类
@@ -871,6 +1001,25 @@ watch(
       danger
       @confirm="confirmRemove"
       @cancel="removing = []"
+    />
+
+    <ShelfNameDialog
+      :open="shelfRenaming"
+      title="重命名书架"
+      :initial="shelf?.name ?? ''"
+      confirm-text="保存"
+      @confirm="confirmRenameShelf"
+      @cancel="shelfRenaming = false"
+    />
+
+    <ConfirmDialog
+      :open="shelfRemoving"
+      title="删除这个书架？"
+      :desc="`「${shelf?.name ?? ''}」会从侧栏移除。书架里的 ${shelf?.bookCount ?? 0} 本书不会被删除，它们仍留在书库中，阅读进度也不受影响。`"
+      confirm-text="删除书架"
+      danger
+      @confirm="confirmRemoveShelf"
+      @cancel="shelfRemoving = false"
     />
 
     <CategoryManager :open="managingCategories" @close="managingCategories = false" />

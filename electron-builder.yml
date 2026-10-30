@@ -32,6 +32,12 @@ asar: true
 npmRebuild: false
 
 extraResources:
+  # 托盘图标（M5-01）：`nativeImage.createFromPath` 只认真实文件系统路径，
+  # asar 里的 png 读不出来，所以必须放到 app.asar 外面
+  - from: resources/icons
+    to: icons
+    filter:
+      - '**/*'
   # PyInstaller --onedir 产物：release/win-unpacked/resources/python/ctext-worker/
   - from: resources/python
     to: python

@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import { existsSync, renameSync } from 'node:fs'
 import initialSql from './001_initial.sql?raw'
 import bookmarkRangeSql from './002_bookmark_range.sql?raw'
+import sourceBreakerSql from './003_source_breaker.sql?raw'
 
 /**
  * 版本化迁移。
@@ -20,7 +21,8 @@ export interface Migration {
 
 export const migrations: readonly Migration[] = [
   { version: 1, name: 'initial', sql: initialSql },
-  { version: 2, name: 'bookmark-range', sql: bookmarkRangeSql }
+  { version: 2, name: 'bookmark-range', sql: bookmarkRangeSql },
+  { version: 3, name: 'source-breaker', sql: sourceBreakerSql }
 ]
 
 export const LATEST_VERSION = migrations[migrations.length - 1]!.version

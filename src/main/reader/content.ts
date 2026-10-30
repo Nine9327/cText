@@ -19,6 +19,7 @@ import { createLogger } from '../log'
 import { readEpubChapter } from './epub'
 import { locateBook } from './paths'
 import { readTxtWindow, textToHtml } from './txt'
+import { getNetworkChapterContent, isNetworkBook } from '../network/service'
 
 const log = createLogger('reader')
 
@@ -127,6 +128,13 @@ async function loadChapter(
   return content
 }
 
+/**
+ * 读一章。
+ *
+ * 网络书走 `network/service.ts`（M4-09）：它有自己的章节缓存与抓取超时，
+ * 缓存键同样带 `updated_at`。两条链路只在"给渲染层一份 ChapterContentDTO"这一点上汇合。
+ */
 export function getChapterContent(db: Db, bookId: string, chapterIdx: number): Promise<ChapterContentDTO> {
+  if (isNetworkBook(db, bookId)) return getNetworkChapterContent(db, bookId, chapterIdx)
   return loadChapter(db, bookId, chapterIdx, true)
 }

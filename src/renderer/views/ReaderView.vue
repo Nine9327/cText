@@ -134,12 +134,29 @@ function describe(err: unknown): PanelError {
     }
   }
   if (code === ERROR_CODES.notFound) {
+    // 网络书的「找不到」不是文件问题：多半是目录变了（章节序号对不上章节地址）
+    if (book.value?.sourceType === 'network') {
+      return {
+        icon: 'warning',
+        title: '这一章取不到了',
+        desc: '站点可能调整过目录。回到详情页点「刷新目录」，再继续阅读。',
+        retryable: true
+      }
+    }
     return {
       icon: 'warning',
       title: '找不到这本书的文件',
       desc: '文件可能被移动、改名或删除了。把它放回原来的目录，或指定一个目录让 cText 按文件名找回来。',
       retryable: true,
       action: 'file'
+    }
+  }
+  if (code === ERROR_CODES.timeout) {
+    return {
+      icon: 'error',
+      title: '这一章抓取超时',
+      desc: '网络书源响应太慢。稍后重试，或换一个书源。',
+      retryable: true
     }
   }
   if (code === ERROR_CODES.parseFailed) {
